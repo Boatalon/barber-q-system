@@ -25,7 +25,6 @@ export default function ShopDisplayPage() {
   const isFirstFetchRef = useRef<boolean>(true);
   const prevServingRef = useRef<string | null>(null);
   const prevWalkInCreatedRef = useRef<string | null>(null);
-  const prevCallCountRef = useRef<number>(0);
   const prevCancelledIdRef = useRef<number | null>(null);
 
   const fetchState = useCallback(async () => {
@@ -36,7 +35,6 @@ export default function ShopDisplayPage() {
       setState(data);
 
       const newServingCode = data.currentServing?.display_code ?? null;
-      const newCallCount = data.currentServing?.call_count ?? 0;
       const newWalkInCreated = data.walkInPopup?.createdAt ?? null;
       const newWalkInCode = data.walkInPopup?.displayCode ?? null;
       const latestCancelled =
@@ -47,7 +45,10 @@ export default function ShopDisplayPage() {
           latestCancelled &&
           latestCancelled.id !== prevCancelledIdRef.current
         ) {
-          announceQueueSkipped(latestCancelled.display_code);
+          announceQueueSkipped(
+            latestCancelled.display_code,
+            newServingCode !== prevServingRef.current ? newServingCode : null
+          );
         } else if (
           data.walkInPopup?.active &&
           newWalkInCreated &&
@@ -55,18 +56,13 @@ export default function ShopDisplayPage() {
           newWalkInCreated !== prevWalkInCreatedRef.current
         ) {
           announceWalkInAdded(newWalkInCode);
-        } else if (
-          newServingCode &&
-          (newServingCode !== prevServingRef.current ||
-            newCallCount > prevCallCountRef.current)
-        ) {
+        } else if (newServingCode && newServingCode !== prevServingRef.current) {
           announceQueueCall(newServingCode);
         }
       }
 
       isFirstFetchRef.current = false;
       prevServingRef.current = newServingCode;
-      prevCallCountRef.current = newCallCount;
       prevWalkInCreatedRef.current = newWalkInCreated;
       prevCancelledIdRef.current = latestCancelled?.id ?? null;
     } catch (err) {

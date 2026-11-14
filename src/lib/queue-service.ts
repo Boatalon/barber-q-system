@@ -175,15 +175,51 @@ export async function evaluateQueueNotifications(
   ]);
 
   const currentServingCode = serving?.display_code ?? null;
+  const lineWaiting = waiting.filter(
+    (item) => item.source === 'LINE' && Boolean(item.line_user_id)
+  );
+  if (lineWaiting.length === 0) {
+    return [];
+  }
+
+  const queueIds = lineWaiting.map((item) => item.id);
+  const { data: existingLogsData } = await supabase
+    .from('notification_logs')
+    .select('queue_id, trigger_type, message')
+    .in('queue_id', queueIds)
+    .in('trigger_type', ['NEAR_1', 'NEAR_2']);
+
+  const existingLogs =
+    (existingLogsData as Array<{
+      queue_id: number;
+      trigger_type: string;
+      message: string;
+    }> | null) ?? [];
+
   const sentLogs: NotificationLogRow[] = [];
 
-  for (const item of waiting) {
-    if (item.source !== 'LINE' || !item.line_user_id) continue;
+  for (const item of lineWaiting) {
+    if (!item.line_user_id) continue;
+    if (item.queuesAhead < 1 || item.queuesAhead > settings.notify_ahead_first) {
+      continue;
+    }
 
-    // เช็คระยะแจ้งเตือนที่ 2 (เช่น เหลือ 1 คิวก่อนถึงลำดับ)
+    const aheadToken1 = `เหลืออีกเพียง ${item.queuesAhead} คิว`;
+    const aheadToken2 = `เหลืออีก ${item.queuesAhead} คิว`;
+    const alreadySentForThisCount = existingLogs.some(
+      (log) =>
+        log.queue_id === item.id &&
+        (log.message.includes(aheadToken1) || log.message.includes(aheadToken2))
+    );
+
+    if (alreadySentForThisCount) {
+      continue;
+    }
+
+    // เช็คระยะใกล้ถึงคิว (เช่น เหลือ <= notify_ahead_second หรือ เหลือ 1 คิวสุดท้าย)
     if (
-      item.queuesAhead === settings.notify_ahead_second &&
-      !item.notifiedNear2
+      item.queuesAhead <= settings.notify_ahead_second ||
+      item.queuesAhead === 1
     ) {
       await supabase
         .from('queues')
@@ -210,11 +246,8 @@ export async function evaluateQueueNotifications(
       continue;
     }
 
-    // เช็คระยะแจ้งเตือนที่ 1 (เช่น เหลือ 3 คิวก่อนถึงลำดับ)
-    if (
-      item.queuesAhead === settings.notify_ahead_first &&
-      !item.notifiedNear1
-    ) {
+    // เช็คระยะแจ้งเตือนล่วงหน้า (เช่น เหลือ <= notify_ahead_first คิว)
+    if (item.queuesAhead <= settings.notify_ahead_first) {
       await supabase
         .from('queues')
         .update({ notified_near_1: true })
@@ -255,7 +288,7 @@ export async function processDueRepeatCalls(): Promise<NotificationLogRow | null
     getActiveQueuesWithPosition(today),
   ]);
 
-  if (!serving) {
+  if (!serving || serving.source !== 'LINE' || !serving.line_user_id) {
     return null;
   }
 
@@ -280,26 +313,22 @@ export async function processDueRepeatCalls(): Promise<NotificationLogRow | null
     .update({ call_count: nextCallCount, last_called_at: nowIso })
     .eq('id', serving.id);
 
-  if (serving.source === 'LINE' && serving.line_user_id) {
-    const msg = `📢 เรียกคิวซ้ำ (${nextCallCount}/${settings.repeat_call_max_count}): ถึงคิวหมายเลข ${serving.display_code} แล้วครับ กรุณาเข้ารับบริการที่ร้าน`;
-    return sendLineNotification({
-      queueId: serving.id,
-      displayCode: serving.display_code,
-      lineUserId: serving.line_user_id,
-      triggerType: 'RECALL',
-      message: msg,
-      flexPayload: {
-        shopName: settings.shop_name,
-        myQueueCode: serving.display_code,
-        myStatus: 'SERVING',
-        currentServingCode: serving.display_code,
-        queuesAhead: 0,
-        headlineText: `เรียกคิวครั้งที่ ${nextCallCount}/${settings.repeat_call_max_count} - เชิญที่ร้านได้เลยครับ`,
-      },
-    });
-  }
-
-  return null;
+  const msg = `📢 เรียกคิวซ้ำ (${nextCallCount}/${settings.repeat_call_max_count}): ถึงคิวหมายเลข ${serving.display_code} แล้วครับ กรุณาเข้ารับบริการที่ร้าน`;
+  return sendLineNotification({
+    queueId: serving.id,
+    displayCode: serving.display_code,
+    lineUserId: serving.line_user_id,
+    triggerType: 'RECALL',
+    message: msg,
+    flexPayload: {
+      shopName: settings.shop_name,
+      myQueueCode: serving.display_code,
+      myStatus: 'SERVING',
+      currentServingCode: serving.display_code,
+      queuesAhead: 0,
+      headlineText: `เรียกคิวครั้งที่ ${nextCallCount}/${settings.repeat_call_max_count} - เชิญที่ร้านได้เลยครับ`,
+    },
+  });
 }
 
 async function getNextQueueNumber(today: string): Promise<number> {
@@ -558,6 +587,7 @@ export async function cancelQueueById(
 ): Promise<{
   cancelled: boolean;
   queue: QueueRow | null;
+  nowServing: EnrichedQueueItem | null;
   reason?: string;
 }> {
   const supabase = getSupabase();
@@ -575,12 +605,14 @@ export async function cancelQueueById(
     return {
       cancelled: false,
       queue: null,
+      nowServing: null,
       reason: 'ไม่พบคิวที่ต้องการยกเลิก หรือคิวนี้ถูกปิดไปแล้ว',
     };
   }
 
   const targetRow = target as QueueRow;
-  const isNoShow = options?.noShow ?? targetRow.status === 'SERVING';
+  const wasServing = targetRow.status === 'SERVING';
+  const isNoShow = options?.noShow ?? wasServing;
   const nowIso = new Date().toISOString();
 
   const { data: updatedRow } = await supabase
@@ -590,8 +622,35 @@ export async function cancelQueueById(
     .select('*')
     .single();
 
+  // หากยกเลิกคิวที่กำลังให้บริการอยู่ (SERVING) ให้เรียกคิวถัดไปที่รออยู่ขึ้นมาเป็น SERVING ทันที
+  let nextServingRow: QueueRow | null = null;
+  if (wasServing) {
+    const { data: nextWaiting } = await supabase
+      .from('queues')
+      .select('*')
+      .eq('queue_date', today)
+      .eq('status', 'WAITING')
+      .order('queue_number', { ascending: true })
+      .limit(1)
+      .maybeSingle();
+
+    if (nextWaiting) {
+      nextServingRow = nextWaiting as QueueRow;
+      await supabase
+        .from('queues')
+        .update({
+          status: 'SERVING',
+          served_at: nowIso,
+          call_count: 1,
+          last_called_at: nowIso,
+        })
+        .eq('id', nextServingRow.id);
+    }
+  }
+
+  const { serving } = await getActiveQueuesWithPosition(today);
+
   if (targetRow.source === 'LINE' && targetRow.line_user_id) {
-    const { serving } = await getActiveQueuesWithPosition(today);
     const message = isNoShow
       ? `✖ คิวหมายเลข ${targetRow.display_code} ของคุณถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการครับ`
       : `✖ คิวหมายเลข ${targetRow.display_code} ถูกยกเลิกแล้วครับ`;
@@ -618,12 +677,37 @@ export async function cancelQueueById(
     });
   }
 
-  // ประเมินการแจ้งเตือนลำดับคิวข้างหน้าใหม่ทันทีหลังตัดคิวที่ยกเลิกออก
+  // แจ้งเตือนคิวใหม่ที่ถูกเลื่อนขึ้นมาเป็น SERVING ทันที (ถ้าเป็นลูกค้า LINE)
+  if (
+    nextServingRow &&
+    nextServingRow.source === 'LINE' &&
+    nextServingRow.line_user_id
+  ) {
+    const callMsg = `🎉 ถึงคิวหมายเลข ${nextServingRow.display_code} ของคุณแล้วครับ! เชิญเข้ารับบริการที่ร้านได้เลยครับ (เรียกครั้งที่ 1/${settings.repeat_call_max_count})`;
+    await sendLineNotification({
+      queueId: nextServingRow.id,
+      displayCode: nextServingRow.display_code,
+      lineUserId: nextServingRow.line_user_id,
+      triggerType: 'CALLED',
+      message: callMsg,
+      flexPayload: {
+        shopName: settings.shop_name,
+        myQueueCode: nextServingRow.display_code,
+        myStatus: 'SERVING',
+        currentServingCode: nextServingRow.display_code,
+        queuesAhead: 0,
+        headlineText: '🎉 ถึงคิวของคุณแล้ว! เชิญที่ร้านได้เลยครับ',
+      },
+    });
+  }
+
+  // ประเมินการแจ้งเตือนลำดับคิวข้างหน้าใหม่ทันทีสำหรับทุกคิวที่กำลังรอ
   await evaluateQueueNotifications(today);
 
   return {
     cancelled: true,
     queue: (updatedRow as QueueRow | null) ?? targetRow,
+    nowServing: serving,
   };
 }
 
@@ -864,7 +948,7 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
     maxCount: settings.repeat_call_max_count,
   };
 
-  if (serving) {
+  if (serving && serving.source === 'LINE') {
     const isExhausted = serving.call_count >= settings.repeat_call_max_count;
     const lastCalledMs = serving.last_called_at
       ? new Date(serving.last_called_at).getTime()

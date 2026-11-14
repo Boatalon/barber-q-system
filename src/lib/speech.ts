@@ -113,12 +113,20 @@ export function announceWalkInAdded(displayCode: string) {
 
 /**
  * เสียงประกาศเมื่อช่างกดยกเลิก/ข้ามคิวเนื่องจากลูกค้าไม่มาเข้ารับบริการ:
- * "ข้ามคิวที่ ... เนื่องจากไม่มาให้บริการ"
+ * "ข้ามคิวที่ ... เนื่องจากไม่มาให้บริการ" (และหากมีคิวถัดไปขึ้นมาแทน จะประกาศต่อด้วย "คิวที่ ...")
  */
-export function announceQueueSkipped(displayCode: string) {
+export function announceQueueSkipped(
+  displayCode: string,
+  nextServingCode?: string | null
+) {
   const num = formatQueueNumberForSpeech(displayCode);
   playChime(520, 110);
-  speakThai(`ข้ามคิวที่ ${num} เนื่องจากไม่มาให้บริการ`);
+  if (nextServingCode) {
+    const nextNum = formatQueueNumberForSpeech(nextServingCode);
+    speakThai(`ข้ามคิวที่ ${num} เนื่องจากไม่มาให้บริการ คิวที่ ${nextNum}`);
+  } else {
+    speakThai(`ข้ามคิวที่ ${num} เนื่องจากไม่มาให้บริการ`);
+  }
 }
 
 

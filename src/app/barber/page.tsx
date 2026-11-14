@@ -41,9 +41,6 @@ export default function BarberControlPage() {
     type: 'success' | 'info' | 'warning' | 'error';
   } | null>(null);
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const isFirstFetchRef = useRef<boolean>(true);
-  const prevServingIdRef = useRef<number | null>(null);
-  const prevCallCountRef = useRef<number>(0);
 
   const showToast = useCallback(
     (
@@ -66,33 +63,13 @@ export default function BarberControlPage() {
         const data: SystemQueueState = await res.json();
         setState(data);
         setConnectionError(false);
-
-        const newServingId = data.currentServing?.id ?? null;
-        const newServingCode = data.currentServing?.display_code ?? null;
-        const newCallCount = data.currentServing?.call_count ?? 0;
-
-        // เมื่อถึงเวลาเรียกคิวซ้ำอัตโนมัติ (call_count เพิ่มขึ้น) ให้พูดเสียง "คิวที่ ..." ด้วย
-        if (
-          !isFirstFetchRef.current &&
-          soundEnabled &&
-          newServingId !== null &&
-          newServingCode &&
-          newServingId === prevServingIdRef.current &&
-          newCallCount > prevCallCountRef.current
-        ) {
-          announceQueueCall(newServingCode);
-        }
-
-        isFirstFetchRef.current = false;
-        prevServingIdRef.current = newServingId;
-        prevCallCountRef.current = newCallCount;
       } else {
         setConnectionError(true);
       }
     } catch {
       setConnectionError(true);
     }
-  }, [soundEnabled]);
+  }, []);
 
   useEffect(() => {
     fetchState();
@@ -142,8 +119,6 @@ export default function BarberControlPage() {
       const data = await res.json();
       if (res.ok && data.state) {
         setState(data.state);
-        prevServingIdRef.current = data.state.currentServing?.id ?? null;
-        prevCallCountRef.current = data.state.currentServing?.call_count ?? 0;
         setNextCooldown(3);
         if (data.nowServing) {
           if (soundEnabled) {
@@ -176,12 +151,7 @@ export default function BarberControlPage() {
       const res = await fetch('/api/queue/recall', { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
-        if (data.state) {
-          setState(data.state);
-          prevServingIdRef.current = data.state.currentServing?.id ?? null;
-          prevCallCountRef.current =
-            data.state.currentServing?.call_count ?? prevCallCountRef.current;
-        }
+        if (data.state) setState(data.state);
         if (soundEnabled) {
           announceQueueCall(currentCode);
         }
@@ -211,11 +181,14 @@ export default function BarberControlPage() {
       if (res.ok && data.state) {
         setState(data.state);
         setShowSkipServingModal(false);
+        const nextCode: string | null = data.nowServing?.display_code ?? null;
         if (soundEnabled) {
-          announceQueueSkipped(skippedCode);
+          announceQueueSkipped(skippedCode, nextCode);
         }
         showToast(
-          `ข้ามคิว ${skippedCode} เนื่องจากไม่มาให้บริการเรียบร้อยแล้ว`,
+          nextCode
+            ? `ข้ามคิว ${skippedCode} และเรียกคิวถัดไป ${nextCode} ทันที`
+            : `ข้ามคิว ${skippedCode} เนื่องจากไม่มาให้บริการเรียบร้อยแล้ว`,
           'warning'
         );
       } else {
@@ -392,9 +365,11 @@ export default function BarberControlPage() {
 
             <div className="text-[11px] text-slate-400">
               {currentServing
-                ? `เรียกแล้ว ${state?.repeatStatus.callCount ?? 1}/${
-                    state?.repeatStatus.maxCount ?? 3
-                  } ครั้ง`
+                ? currentServing.source === 'LINE'
+                  ? `แจ้งเตือน LINE แล้ว ${state?.repeatStatus.callCount ?? 1}/${
+                      state?.repeatStatus.maxCount ?? 3
+                    } ครั้ง`
+                  : 'ลูกค้าหน้าร้าน'
                 : 'ยังไม่มีคิวที่กำลังตัด'}
             </div>
           </div>
@@ -441,21 +416,25 @@ export default function BarberControlPage() {
         {currentServing && (
           <div className="mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl bg-slate-100 p-2.5">
             <div className="text-xs text-slate-700 px-1">
-              {state?.repeatStatus.isRepeatExhausted ? (
-                <span className="font-semibold text-amber-800">
-                  เรียกซ้ำครบ {state.repeatStatus.maxCount} ครั้งแล้ว (ไม่ข้ามคิวเอง รอช่างกดปุ่มคิวถัดไปหรือยกเลิกคิว)
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5 font-medium">
-                  <Clock className="h-3.5 w-3.5 text-slate-500 shrink-0" />
-                  <span>
-                    เรียกซ้ำอัตโนมัติในอีก{' '}
-                    <strong className="tabular-nums">
-                      {state?.repeatStatus.nextRepeatInSec ?? 0}
-                    </strong>{' '}
-                    วินาที
+              {currentServing.source === 'LINE' ? (
+                state?.repeatStatus.isRepeatExhausted ? (
+                  <span className="font-semibold text-amber-800">
+                    แจ้งเตือน LINE ครบ {state.repeatStatus.maxCount} ครั้งแล้ว
                   </span>
-                </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 font-medium">
+                    <Clock className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                    <span>
+                      ส่งข้อความเตือนซ้ำใน LINE อีก{' '}
+                      <strong className="tabular-nums">
+                        {state?.repeatStatus.nextRepeatInSec ?? 0}
+                      </strong>{' '}
+                      วินาที
+                    </span>
+                  </span>
+                )
+              ) : (
+                <span>กดปุ่มเรียกคิวซ้ำเพื่อประกาศเสียงเรียกคิวอีกครั้ง</span>
               )}
             </div>
 

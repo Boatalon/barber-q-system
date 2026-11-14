@@ -27,6 +27,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       success: true,
       cancelledQueue: result.queue,
+      nowServing: result.nowServing,
       state,
     });
   } catch (err) {
