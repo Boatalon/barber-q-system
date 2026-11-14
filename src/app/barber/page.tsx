@@ -437,21 +437,21 @@ export default function BarberControlPage() {
 
             <div className="grid grid-cols-2 sm:flex items-center gap-2 shrink-0">
               <button
+                onClick={() => setShowSkipServingModal(true)}
+                disabled={loadingAction !== null}
+                className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-white border border-slate-300 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-800 shadow-sm hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50"
+              >
+                <XCircle className="h-4 w-4 text-slate-500 shrink-0" />
+                <span>ยกเลิกคิว {currentServing.display_code}</span>
+              </button>
+
+              <button
                 onClick={handleRecall}
                 disabled={loadingAction !== null}
                 className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-white border border-slate-300 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-800 shadow-sm hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50"
               >
                 <BellRing className="h-4 w-4 text-amber-600 shrink-0" />
                 <span>เรียกคิว {currentServing.display_code} ซ้ำ</span>
-              </button>
-
-              <button
-                onClick={() => setShowSkipServingModal(true)}
-                disabled={loadingAction !== null}
-                className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-rose-700 shadow-sm hover:bg-rose-100 active:bg-rose-200 disabled:opacity-50"
-              >
-                <XCircle className="h-4 w-4 text-rose-600 shrink-0" />
-                <span>ยกเลิกคิว {currentServing.display_code}</span>
               </button>
             </div>
           </div>
@@ -721,7 +721,7 @@ export default function BarberControlPage() {
               <button
                 onClick={() => setShowSkipServingModal(false)}
                 disabled={loadingAction !== null}
-                className="flex min-h-[44px] items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50"
+                className="flex min-h-[44px] items-center justify-center rounded-xl bg-emerald-600 px-4 py-2.5 text-xs sm:text-sm font-bold text-white shadow-sm hover:bg-emerald-700 active:bg-emerald-800 disabled:opacity-50"
               >
                 ไม่ยกเลิก
               </button>
