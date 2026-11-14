@@ -11,7 +11,11 @@ import {
   MessageCircle,
 } from 'lucide-react';
 import type { SystemQueueState } from '@/lib/queue-service';
-import { announceQueueCall, announceWalkInAdded } from '@/lib/speech';
+import {
+  announceQueueCall,
+  announceQueueSkipped,
+  announceWalkInAdded,
+} from '@/lib/speech';
 
 export default function ShopDisplayPage() {
   const [state, setState] = useState<SystemQueueState | null>(null);
@@ -22,6 +26,7 @@ export default function ShopDisplayPage() {
   const prevServingRef = useRef<string | null>(null);
   const prevWalkInCreatedRef = useRef<string | null>(null);
   const prevCallCountRef = useRef<number>(0);
+  const prevCancelledIdRef = useRef<number | null>(null);
 
   const fetchState = useCallback(async () => {
     try {
@@ -34,9 +39,16 @@ export default function ShopDisplayPage() {
       const newCallCount = data.currentServing?.call_count ?? 0;
       const newWalkInCreated = data.walkInPopup?.createdAt ?? null;
       const newWalkInCode = data.walkInPopup?.displayCode ?? null;
+      const latestCancelled =
+        data.recentHistory.find((h) => h.status === 'CANCELLED') ?? null;
 
       if (!isFirstFetchRef.current && soundEnabled) {
         if (
+          latestCancelled &&
+          latestCancelled.id !== prevCancelledIdRef.current
+        ) {
+          announceQueueSkipped(latestCancelled.display_code);
+        } else if (
           data.walkInPopup?.active &&
           newWalkInCreated &&
           newWalkInCode &&
@@ -56,6 +68,7 @@ export default function ShopDisplayPage() {
       prevServingRef.current = newServingCode;
       prevCallCountRef.current = newCallCount;
       prevWalkInCreatedRef.current = newWalkInCreated;
+      prevCancelledIdRef.current = latestCancelled?.id ?? null;
     } catch (err) {
       console.error('Display poll error:', err);
     }

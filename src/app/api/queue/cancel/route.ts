@@ -12,7 +12,9 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const result = await cancelQueueById(queueId);
+    const result = await cancelQueueById(queueId, {
+      noShow: Boolean(body.noShow),
+    });
     const state = await getSystemQueueState();
 
     if (!result.cancelled) {

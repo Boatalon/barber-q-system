@@ -546,9 +546,12 @@ export async function cancelLineQueue(lineUserId: string): Promise<{
 }
 
 /**
- * ช่างกดยกเลิกคิวรายแถวจากตารางคิวรอ (รองรับทั้งคิวหน้าร้านและคิว LINE)
+ * ช่างกดยกเลิก/ข้ามคิว (รองรับทั้งคิวที่กำลังให้บริการ SERVING และคิวที่กำลังรอ WAITING)
  */
-export async function cancelQueueById(queueId: number): Promise<{
+export async function cancelQueueById(
+  queueId: number,
+  options?: { noShow?: boolean }
+): Promise<{
   cancelled: boolean;
   queue: QueueRow | null;
   reason?: string;
@@ -561,18 +564,19 @@ export async function cancelQueueById(queueId: number): Promise<{
     .from('queues')
     .select('*')
     .eq('id', queueId)
-    .eq('status', 'WAITING')
+    .in('status', ['WAITING', 'SERVING'])
     .maybeSingle();
 
   if (!target) {
     return {
       cancelled: false,
       queue: null,
-      reason: 'ไม่พบคิวที่ต้องการยกเลิก หรือคิวนี้ไม่ได้อยู่ในสถานะรอ',
+      reason: 'ไม่พบคิวที่ต้องการยกเลิก หรือคิวนี้ถูกปิดไปแล้ว',
     };
   }
 
   const targetRow = target as QueueRow;
+  const isNoShow = options?.noShow ?? targetRow.status === 'SERVING';
   const nowIso = new Date().toISOString();
 
   const { data: updatedRow } = await supabase
@@ -584,19 +588,28 @@ export async function cancelQueueById(queueId: number): Promise<{
 
   if (targetRow.source === 'LINE' && targetRow.line_user_id) {
     const { serving } = await getActiveQueuesWithPosition(today);
+    const message = isNoShow
+      ? `✖ คิวหมายเลข ${targetRow.display_code} ของคุณถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการครับ`
+      : `✖ คิวหมายเลข ${targetRow.display_code} ถูกยกเลิกแล้วครับ`;
+
     await sendLineNotification({
       queueId: targetRow.id,
       displayCode: targetRow.display_code,
       lineUserId: targetRow.line_user_id,
       triggerType: 'CANCELLED',
-      message: `คิวหมายเลข ${targetRow.display_code} ถูกยกเลิกแล้วครับ`,
+      message,
       flexPayload: {
         shopName: settings.shop_name,
         myQueueCode: targetRow.display_code,
         myStatus: 'CANCELLED',
         currentServingCode: serving?.display_code ?? null,
         queuesAhead: 0,
-        headlineText: 'ยกเลิกคิวเรียบร้อยแล้ว',
+        headlineText: isNoShow
+          ? 'ถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการ'
+          : 'ยกเลิกคิวเรียบร้อยแล้ว',
+        statusTextOverride: isNoShow
+          ? 'ถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการ'
+          : 'ยกเลิกคิวแล้ว',
       },
     });
   }

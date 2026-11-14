@@ -20,7 +20,11 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { SystemQueueState } from '@/lib/queue-service';
-import { announceQueueCall, announceWalkInAdded } from '@/lib/speech';
+import {
+  announceQueueCall,
+  announceQueueSkipped,
+  announceWalkInAdded,
+} from '@/lib/speech';
 
 export default function BarberControlPage() {
   const [state, setState] = useState<SystemQueueState | null>(null);
@@ -31,6 +35,7 @@ export default function BarberControlPage() {
   const [connectionError, setConnectionError] = useState(false);
   const [nextCooldown, setNextCooldown] = useState(0);
   const [confirmCancelId, setConfirmCancelId] = useState<number | null>(null);
+  const [showSkipServingModal, setShowSkipServingModal] = useState(false);
   const [toastMessage, setToastMessage] = useState<{
     text: string;
     type: 'success' | 'info' | 'warning' | 'error';
@@ -161,6 +166,38 @@ export default function BarberControlPage() {
     }
   };
 
+  const handleSkipServingQueue = async () => {
+    if (loadingAction || !state?.currentServing) return;
+    const targetId = state.currentServing.id;
+    const skippedCode = state.currentServing.display_code;
+    setLoadingAction('cancel');
+    try {
+      const res = await fetch('/api/queue/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queueId: targetId, noShow: true }),
+      });
+      const data = await res.json();
+      if (res.ok && data.state) {
+        setState(data.state);
+        setShowSkipServingModal(false);
+        if (soundEnabled) {
+          announceQueueSkipped(skippedCode);
+        }
+        showToast(
+          `ข้ามคิว ${skippedCode} เนื่องจากไม่มาให้บริการเรียบร้อยแล้ว`,
+          'warning'
+        );
+      } else {
+        showToast(data.error || 'ไม่สามารถยกเลิกคิวได้', 'error');
+      }
+    } catch {
+      showToast('การเชื่อมต่อขัดข้อง ไม่สามารถยกเลิกคิวได้', 'error');
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
   const handleCancelRow = async (queueId: number, displayCode: string) => {
     if (loadingAction) return;
     setLoadingAction('cancel');
@@ -168,12 +205,15 @@ export default function BarberControlPage() {
       const res = await fetch('/api/queue/cancel', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ queueId }),
+        body: JSON.stringify({ queueId, noShow: true }),
       });
       const data = await res.json();
       if (res.ok && data.state) {
         setState(data.state);
         setConfirmCancelId(null);
+        if (soundEnabled) {
+          announceQueueSkipped(displayCode);
+        }
         showToast(`ยกเลิกคิว ${displayCode} เรียบร้อยแล้ว`, 'warning');
       } else {
         showToast(data.error || 'ไม่สามารถยกเลิกคิวได้', 'error');
@@ -395,14 +435,25 @@ export default function BarberControlPage() {
               )}
             </div>
 
-            <button
-              onClick={handleRecall}
-              disabled={loadingAction !== null}
-              className="flex min-h-[44px] w-full sm:w-auto items-center justify-center gap-2 rounded-xl bg-white border border-slate-300 px-4 py-2.5 text-xs sm:text-sm font-bold text-slate-800 shadow-sm hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50 shrink-0"
-            >
-              <BellRing className="h-4 w-4 text-amber-600" />
-              <span>เรียกคิว {currentServing.display_code} ซ้ำ</span>
-            </button>
+            <div className="grid grid-cols-2 sm:flex items-center gap-2 shrink-0">
+              <button
+                onClick={handleRecall}
+                disabled={loadingAction !== null}
+                className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-white border border-slate-300 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-800 shadow-sm hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50"
+              >
+                <BellRing className="h-4 w-4 text-amber-600 shrink-0" />
+                <span>เรียกคิว {currentServing.display_code} ซ้ำ</span>
+              </button>
+
+              <button
+                onClick={() => setShowSkipServingModal(true)}
+                disabled={loadingAction !== null}
+                className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-rose-700 shadow-sm hover:bg-rose-100 active:bg-rose-200 disabled:opacity-50"
+              >
+                <XCircle className="h-4 w-4 text-rose-600 shrink-0" />
+                <span>ยกเลิกคิว {currentServing.display_code}</span>
+              </button>
+            </div>
           </div>
         )}
       </section>
@@ -623,6 +674,61 @@ export default function BarberControlPage() {
           </div>
         </div>
       </details>
+
+      {/* Popup ยืนยันการยกเลิก/ข้ามคิวที่กำลังให้บริการ (ปุ่มยืนยันสีแดงอยู่ด้านซ้าย) */}
+      {showSkipServingModal && currentServing && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="skip-queue-modal-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"
+        >
+          <div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-xl space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+                <XCircle className="h-5 w-5" />
+              </div>
+              <div>
+                <h2
+                  id="skip-queue-modal-title"
+                  className="text-base font-bold text-slate-900"
+                >
+                  ยืนยันยกเลิกคิว {currentServing.display_code}?
+                </h2>
+                <p className="mt-1 text-xs text-slate-600">
+                  ระบบจะประกาศเสียงว่า{' '}
+                  <strong className="text-slate-900">
+                    &ldquo;ข้ามคิวที่ {Number(currentServing.display_code) || currentServing.display_code} เนื่องจากไม่มาให้บริการ&rdquo;
+                  </strong>
+                  {currentServing.source === 'LINE' &&
+                    ' และส่งข้อความ LINE แจ้งลูกค้าว่าถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการ'}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2.5 pt-1">
+              {/* ปุ่มยืนยันสีแดงอยู่ด้านซ้ายตามที่กำหนด */}
+              <button
+                onClick={handleSkipServingQueue}
+                disabled={loadingAction !== null}
+                className="flex min-h-[44px] items-center justify-center rounded-xl bg-rose-600 px-4 py-2.5 text-xs sm:text-sm font-bold text-white shadow-sm hover:bg-rose-700 active:bg-rose-800 disabled:opacity-50"
+              >
+                {loadingAction === 'cancel'
+                  ? 'กำลังยกเลิก...'
+                  : 'ยืนยันยกเลิกคิว'}
+              </button>
+
+              <button
+                onClick={() => setShowSkipServingModal(false)}
+                disabled={loadingAction !== null}
+                className="flex min-h-[44px] items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs sm:text-sm font-bold text-slate-700 hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50"
+              >
+                ไม่ยกเลิก
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

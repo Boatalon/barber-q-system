@@ -26,6 +26,7 @@ export interface QueueCardPayload {
   currentServingCode: string | null;
   queuesAhead: number;
   headlineText: string;
+  statusTextOverride?: string;
 }
 
 /**
@@ -41,24 +42,30 @@ export function buildQueueFlexMessage(
     currentServingCode,
     queuesAhead,
     headlineText,
+    statusTextOverride,
   } = payload;
 
   const isServing = myStatus === 'SERVING';
   const isWaiting = myStatus === 'WAITING';
+  const isCancelled = myStatus === 'CANCELLED';
   const statusBadgeColor = isServing
     ? '#16a34a'
     : isWaiting
     ? '#2563eb'
+    : isCancelled
+    ? '#dc2626'
     : '#64748b';
-  const statusText = isServing
-    ? 'ถึงคิวของคุณแล้ว! เชิญที่เก้าอี้ตัดผม'
-    : isWaiting
-    ? queuesAhead === 0
-      ? 'คุณคือคิวแรก รอช่างกดเริ่มคิว'
-      : `รออีก ${queuesAhead} คิวก่อนถึงลำดับของคุณ`
-    : myStatus === 'CANCELLED'
-    ? 'ยกเลิกคิวแล้ว'
-    : 'ให้บริการเสร็จสิ้น';
+  const statusText =
+    statusTextOverride ??
+    (isServing
+      ? 'ถึงคิวของคุณแล้ว! เชิญที่เก้าอี้ตัดผม'
+      : isWaiting
+      ? queuesAhead === 0
+        ? 'คุณคือคิวแรก รอช่างกดเริ่มคิว'
+        : `รออีก ${queuesAhead} คิวก่อนถึงลำดับของคุณ`
+      : isCancelled
+      ? 'ยกเลิกคิวแล้ว'
+      : 'ให้บริการเสร็จสิ้น');
 
   const footerContents: messagingApi.FlexComponent[] = [];
 
