@@ -255,7 +255,7 @@ export async function processDueRepeatCalls(): Promise<NotificationLogRow | null
     getActiveQueuesWithPosition(today),
   ]);
 
-  if (!serving || serving.source !== 'LINE' || !serving.line_user_id) {
+  if (!serving) {
     return null;
   }
 
@@ -280,22 +280,26 @@ export async function processDueRepeatCalls(): Promise<NotificationLogRow | null
     .update({ call_count: nextCallCount, last_called_at: nowIso })
     .eq('id', serving.id);
 
-  const msg = `📢 เรียกคิวซ้ำ (${nextCallCount}/${settings.repeat_call_max_count}): ถึงคิวหมายเลข ${serving.display_code} แล้วครับ กรุณาเข้ารับบริการที่ร้าน`;
-  return sendLineNotification({
-    queueId: serving.id,
-    displayCode: serving.display_code,
-    lineUserId: serving.line_user_id,
-    triggerType: 'RECALL',
-    message: msg,
-    flexPayload: {
-      shopName: settings.shop_name,
-      myQueueCode: serving.display_code,
-      myStatus: 'SERVING',
-      currentServingCode: serving.display_code,
-      queuesAhead: 0,
-      headlineText: `เรียกคิวครั้งที่ ${nextCallCount}/${settings.repeat_call_max_count} - เชิญที่ร้านได้เลยครับ`,
-    },
-  });
+  if (serving.source === 'LINE' && serving.line_user_id) {
+    const msg = `📢 เรียกคิวซ้ำ (${nextCallCount}/${settings.repeat_call_max_count}): ถึงคิวหมายเลข ${serving.display_code} แล้วครับ กรุณาเข้ารับบริการที่ร้าน`;
+    return sendLineNotification({
+      queueId: serving.id,
+      displayCode: serving.display_code,
+      lineUserId: serving.line_user_id,
+      triggerType: 'RECALL',
+      message: msg,
+      flexPayload: {
+        shopName: settings.shop_name,
+        myQueueCode: serving.display_code,
+        myStatus: 'SERVING',
+        currentServingCode: serving.display_code,
+        queuesAhead: 0,
+        headlineText: `เรียกคิวครั้งที่ ${nextCallCount}/${settings.repeat_call_max_count} - เชิญที่ร้านได้เลยครับ`,
+      },
+    });
+  }
+
+  return null;
 }
 
 async function getNextQueueNumber(today: string): Promise<number> {
@@ -860,7 +864,7 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
     maxCount: settings.repeat_call_max_count,
   };
 
-  if (serving && serving.source === 'LINE') {
+  if (serving) {
     const isExhausted = serving.call_count >= settings.repeat_call_max_count;
     const lastCalledMs = serving.last_called_at
       ? new Date(serving.last_called_at).getTime()
