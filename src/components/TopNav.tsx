@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Scissors, Monitor, MessageSquare, Settings } from 'lucide-react';
+import { Scissors, Monitor, Settings } from 'lucide-react';
 
 export default function TopNav() {
   const pathname = usePathname();
@@ -19,12 +19,6 @@ export default function TopNav() {
       label: 'จอร้าน',
       fullLabel: 'จอหน้าร้าน',
       icon: Monitor,
-    },
-    {
-      href: '/line-simulator',
-      label: 'LINE',
-      fullLabel: 'จำลอง LINE ลูกค้า',
-      icon: MessageSquare,
     },
     {
       href: '/settings',

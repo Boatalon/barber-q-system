@@ -592,17 +592,9 @@ export default function BarberControlPage() {
 
           {/* บันทึกการแจ้งเตือน LINE */}
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-xs font-bold text-slate-500">
-                ข้อความแจ้งเตือน LINE ล่าสุด
-              </h3>
-              <Link
-                href="/line-simulator"
-                className="text-xs font-bold text-emerald-600 hover:underline"
-              >
-                เปิดหน้าจำลอง LINE
-              </Link>
-            </div>
+            <h3 className="text-xs font-bold text-slate-500 mb-2">
+              ข้อความแจ้งเตือน LINE ล่าสุด
+            </h3>
 
             {state?.recentNotifications.length ? (
               <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
