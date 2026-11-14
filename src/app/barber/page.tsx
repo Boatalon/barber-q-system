@@ -6,7 +6,6 @@ import {
   Plus,
   FastForward,
   BellRing,
-  Users,
   Store,
   MessageCircle,
   CheckCircle2,
@@ -15,8 +14,10 @@ import {
   VolumeX,
   RefreshCw,
   Monitor,
-  Sparkles,
   Clock,
+  ChevronDown,
+  AlertCircle,
+  Trash2,
 } from 'lucide-react';
 import type { SystemQueueState } from '@/lib/queue-service';
 
@@ -42,29 +43,35 @@ function playBeep(freq = 880, durationMs = 140) {
     osc.start();
     osc.stop(ctx.currentTime + durationMs / 1000);
   } catch {
-    // Ignore audio context errors if blocked
+    // Ignore audio context restriction
   }
 }
 
 export default function BarberControlPage() {
   const [state, setState] = useState<SystemQueueState | null>(null);
   const [loadingAction, setLoadingAction] = useState<
-    'walkin' | 'next' | 'recall' | null
+    'walkin' | 'next' | 'recall' | 'cancel' | null
   >(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
+  const [connectionError, setConnectionError] = useState(false);
+  const [nextCooldown, setNextCooldown] = useState(0);
+  const [confirmCancelId, setConfirmCancelId] = useState<number | null>(null);
   const [toastMessage, setToastMessage] = useState<{
     text: string;
-    type: 'success' | 'info' | 'warning';
+    type: 'success' | 'info' | 'warning' | 'error';
   } | null>(null);
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const showToast = useCallback(
-    (text: string, type: 'success' | 'info' | 'warning' = 'success') => {
+    (
+      text: string,
+      type: 'success' | 'info' | 'warning' | 'error' = 'success'
+    ) => {
       setToastMessage({ text, type });
       if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
       toastTimerRef.current = setTimeout(() => {
         setToastMessage(null);
-      }, 4500);
+      }, 4000);
     },
     []
   );
@@ -75,9 +82,12 @@ export default function BarberControlPage() {
       if (res.ok) {
         const data: SystemQueueState = await res.json();
         setState(data);
+        setConnectionError(false);
+      } else {
+        setConnectionError(true);
       }
-    } catch (err) {
-      console.error('Error fetching state:', err);
+    } catch {
+      setConnectionError(true);
     }
   }, []);
 
@@ -86,6 +96,15 @@ export default function BarberControlPage() {
     const interval = setInterval(fetchState, 1500);
     return () => clearInterval(interval);
   }, [fetchState]);
+
+  // นับถอยหลังระบบกันกดปุ่มข้ามคิวเบิ้ล (3 วินาที)
+  useEffect(() => {
+    if (nextCooldown <= 0) return;
+    const timer = setTimeout(() => {
+      setNextCooldown((prev) => Math.max(0, prev - 1));
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [nextCooldown]);
 
   const handleAddWalkIn = async () => {
     if (loadingAction) return;
@@ -97,48 +116,54 @@ export default function BarberControlPage() {
         setState(data.state);
         if (soundEnabled) playBeep(960, 150);
         showToast(
-          `ออกคิวหน้าร้านหมายเลข ${data.issuedQueue.display_code} สำเร็จ! (คิวรอรวม ${data.totalWaiting} คิว) แจ้งให้ลูกค้าจำหมายเลขนี้ได้เลย`,
+          `ออกคิวหน้าร้าน ${data.issuedQueue.display_code} สำเร็จ (รอรวม ${data.totalWaiting} คิว)`,
           'success'
         );
+      } else {
+        showToast(data.error || 'ไม่สามารถเพิ่มคิวหน้าร้านได้', 'error');
       }
+    } catch {
+      showToast('การเชื่อมต่อขัดข้อง ไม่สามารถเพิ่มคิวได้', 'error');
     } finally {
       setLoadingAction(null);
     }
   };
 
   const handleNextQueue = async () => {
-    if (loadingAction) return;
+    if (loadingAction || nextCooldown > 0) return;
     setLoadingAction('next');
     try {
       const res = await fetch('/api/queue/next', { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.state) {
         setState(data.state);
+        setNextCooldown(3);
         if (soundEnabled) {
           playBeep(660, 120);
           setTimeout(() => playBeep(880, 180), 130);
         }
         if (data.nowServing) {
           showToast(
-            `เลื่อนไปยังคิว ${data.nowServing.display_code} (${
+            `กำลังเรียกคิว ${data.nowServing.display_code} (${
               data.nowServing.source === 'LINE' ? 'ลูกค้า LINE' : 'ลูกค้าหน้าร้าน'
-            }) เรียบร้อยแล้ว`,
+            })`,
             'info'
           );
         } else {
-          showToast(
-            'ปิดคิวปัจจุบันเรียบร้อยแล้ว ขณะนี้ไม่มีคิวที่รออยู่ในระบบ',
-            'warning'
-          );
+          showToast('ปิดคิวแล้ว ขณะนี้ไม่มีคิวรอในระบบ', 'warning');
         }
+      } else {
+        showToast(data.error || 'ไม่สามารถเลื่อนคิวได้', 'error');
       }
+    } catch {
+      showToast('การเชื่อมต่อขัดข้อง ไม่สามารถเลื่อนคิวได้', 'error');
     } finally {
       setLoadingAction(null);
     }
   };
 
   const handleRecall = async () => {
-    if (loadingAction) return;
+    if (loadingAction || !state?.currentServing) return;
     setLoadingAction('recall');
     try {
       const res = await fetch('/api/queue/recall', { method: 'POST' });
@@ -147,13 +172,42 @@ export default function BarberControlPage() {
         if (data.state) setState(data.state);
         if (soundEnabled) playBeep(780, 200);
         showToast(data.message || 'ส่งสัญญาณเรียกคิวซ้ำแล้ว', 'info');
+      } else {
+        showToast(data.error || 'ไม่สามารถเรียกคิวซ้ำได้', 'error');
       }
+    } catch {
+      showToast('การเชื่อมต่อขัดข้อง ไม่สามารถเรียกคิวซ้ำได้', 'error');
     } finally {
       setLoadingAction(null);
     }
   };
 
-  const currentServingCode = state?.currentServing?.display_code ?? '---';
+  const handleCancelRow = async (queueId: number, displayCode: string) => {
+    if (loadingAction) return;
+    setLoadingAction('cancel');
+    try {
+      const res = await fetch('/api/queue/cancel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ queueId }),
+      });
+      const data = await res.json();
+      if (res.ok && data.state) {
+        setState(data.state);
+        setConfirmCancelId(null);
+        showToast(`ยกเลิกคิว ${displayCode} เรียบร้อยแล้ว`, 'warning');
+      } else {
+        showToast(data.error || 'ไม่สามารถยกเลิกคิวได้', 'error');
+      }
+    } catch {
+      showToast('การเชื่อมต่อขัดข้อง ไม่สามารถยกเลิกคิวได้', 'error');
+    } finally {
+      setLoadingAction(null);
+    }
+  };
+
+  const currentServing = state?.currentServing ?? null;
+  const currentServingCode = currentServing?.display_code ?? '---';
   const totalWaiting = state?.totalWaiting ?? 0;
   const popupActive = state?.walkInPopup?.active ?? false;
   const latestWalkInCode =
@@ -163,491 +217,441 @@ export default function BarberControlPage() {
     '---';
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6 space-y-6">
-      {/* แถบแจ้งเตือนสถานะการกดปุ่ม */}
-      {toastMessage && (
+    <div className="mx-auto max-w-xl px-3 py-3 sm:py-5 space-y-3.5">
+      {/* แจ้งเตือนเมื่ออินเทอร์เน็ตหรือการเชื่อมต่อขัดข้อง */}
+      {connectionError && (
         <div
-          className={`flex items-center justify-between rounded-2xl px-5 py-3.5 text-sm font-semibold shadow-md transition-all ${
-            toastMessage.type === 'success'
-              ? 'bg-emerald-600 text-white'
-              : toastMessage.type === 'warning'
-              ? 'bg-amber-500 text-white'
-              : 'bg-blue-600 text-white'
-          }`}
+          role="alert"
+          className="flex items-center justify-between gap-2 rounded-xl bg-rose-600 px-3.5 py-2.5 text-xs font-semibold text-white"
         >
-          <div className="flex items-center gap-2.5">
-            <Sparkles className="h-5 w-5 shrink-0" />
-            <span>{toastMessage.text}</span>
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span>สัญญาณเชื่อมต่อเซิร์ฟเวอร์ขัดข้อง กำลังลองเชื่อมต่อใหม่...</span>
           </div>
           <button
+            onClick={fetchState}
+            className="rounded-lg bg-white/20 px-2.5 py-1 text-xs font-bold hover:bg-white/30"
+          >
+            ลองใหม่
+          </button>
+        </div>
+      )}
+
+      {/* แถบแจ้งผลการกดปุ่ม */}
+      {toastMessage && (
+        <div
+          role="status"
+          aria-live="polite"
+          className={`flex items-center justify-between gap-2 rounded-xl px-4 py-2.5 text-xs sm:text-sm font-semibold text-white shadow-sm ${
+            toastMessage.type === 'success'
+              ? 'bg-emerald-600'
+              : toastMessage.type === 'error'
+              ? 'bg-rose-600'
+              : toastMessage.type === 'warning'
+              ? 'bg-amber-600'
+              : 'bg-blue-600'
+          }`}
+        >
+          <span>{toastMessage.text}</span>
+          <button
             onClick={() => setToastMessage(null)}
-            className="text-xs underline opacity-90 hover:opacity-100"
+            className="text-xs underline opacity-90 hover:opacity-100 shrink-0"
           >
             ปิด
           </button>
         </div>
       )}
 
-      {/* ส่วนบน: กล่องควบคุมคิวสำหรับช่าง (แทนปุ่มกดจริง + จอเล็ก MAX7219 บนโต๊ะช่าง) */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        {/* ฝั่งซ้าย: แผงปุ่มกดแทนปุ่มจริง (Physical Button Replacement) */}
-        <div className="lg:col-span-7 flex flex-col justify-between rounded-3xl border-2 border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-4">
-            <div>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-slate-100 px-3 py-1 text-xs font-bold text-slate-700">
-                🎛️ กล่องควบคุมคิวสำหรับช่าง (แทนปุ่มกดจริง ESP32)
-              </span>
-              <h1 className="mt-1.5 text-xl font-extrabold text-slate-900">
-                กดเพิ่มคิวหน้าร้าน หรือ เลื่อนไปคิวถัดไป
-              </h1>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => setSoundEnabled(!soundEnabled)}
-                className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-                title="เปิด/ปิดเสียงปุ่มกด"
-              >
-                {soundEnabled ? (
-                  <>
-                    <Volume2 className="h-4 w-4 text-emerald-600" />
-                    เสียงเปิด
-                  </>
-                ) : (
-                  <>
-                    <VolumeX className="h-4 w-4 text-slate-400" />
-                    ปิดเสียง
-                  </>
-                )}
-              </button>
-              <Link
-                href="/display"
-                target="_blank"
-                className="inline-flex items-center gap-1.5 rounded-xl bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
-              >
-                <Monitor className="h-4 w-4" />
-                เปิดจอหน้าร้านแยกแท็บ
-              </Link>
-            </div>
+      {/* โซนที่ 1: สถานะคิวปัจจุบัน + จำนวนคิวรอ + ปุ่มเรียกซ้ำ (รวมอยู่ในกรอบเดียวสำหรับหน้าจอแนวตั้ง) */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5 mb-3">
+          <h1 className="text-sm font-bold text-slate-800">
+            สถานะคิวหน้าร้าน
+          </h1>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => setSoundEnabled(!soundEnabled)}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              {soundEnabled ? (
+                <>
+                  <Volume2 className="h-3.5 w-3.5 text-emerald-600" />
+                  <span>เสียงเปิด</span>
+                </>
+              ) : (
+                <>
+                  <VolumeX className="h-3.5 w-3.5 text-slate-400" />
+                  <span>ปิดเสียง</span>
+                </>
+              )}
+            </button>
+            <Link
+              href="/display"
+              target="_blank"
+              className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+            >
+              <Monitor className="h-3.5 w-3.5" />
+              <span>จอร้าน</span>
+            </Link>
+            <button
+              onClick={fetchState}
+              aria-label="รีเฟรชข้อมูลคิว"
+              className="rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+            </button>
           </div>
+        </div>
 
-          {/* จอเล็กบนโต๊ะช่าง (จำลอง MAX7219 8-Digit Display จากเอกสารหน้า 2 & 5) */}
-          <div className="my-5 rounded-2xl border-4 border-slate-800 bg-slate-950 p-4 shadow-inner">
-            <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
-              <span className="font-mono uppercase tracking-wider">
-                MAX7219 • จอแจ้งเลขคิวใหม่บนโต๊ะช่าง & จำนวนคิวรอ
+        {/* แถวตัวเลขหลัก 3 ช่องในแนวตั้ง/แนวนอนที่ดูง่ายบนจอมือถือ */}
+        <div className="grid grid-cols-12 gap-2.5 items-stretch">
+          {/* คิวที่กำลังตัดปัจจุบัน */}
+          <div className="col-span-7 flex flex-col justify-between rounded-xl bg-slate-900 p-3.5 text-white">
+            <div className="flex items-center justify-between gap-1">
+              <span className="text-xs font-semibold text-slate-300">
+                กำลังให้บริการ
               </span>
-              {popupActive && (
-                <span className="inline-flex items-center gap-1 rounded-full bg-red-500/20 px-2.5 py-0.5 text-xs font-bold text-red-400 animate-pulse">
-                  ● เพิ่งออกคิวหน้าร้านใหม่! แจ้งเลขนี้ให้ลูกค้าจำ
+              {currentServing && (
+                <span
+                  className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[11px] font-bold ${
+                    currentServing.source === 'LINE'
+                      ? 'bg-emerald-500/20 text-emerald-300'
+                      : 'bg-amber-500/20 text-amber-300'
+                  }`}
+                >
+                  {currentServing.source === 'LINE' ? (
+                    <>
+                      <MessageCircle className="h-3 w-3" />
+                      LINE
+                    </>
+                  ) : (
+                    <>
+                      <Store className="h-3 w-3" />
+                      หน้าร้าน
+                    </>
+                  )}
                 </span>
               )}
             </div>
-            <div className="grid grid-cols-2 gap-4 rounded-xl bg-black/80 px-5 py-3 border border-slate-800">
-              <div>
-                <div className="text-[11px] font-medium text-slate-400">
-                  เลขคิวหน้าร้านล่าสุดที่ออก
-                </div>
-                <div
-                  className={`font-mono text-4xl sm:text-5xl font-black tracking-widest text-red-500 led-glow-red ${
-                    popupActive ? 'animate-bounce' : ''
-                  }`}
-                >
-                  {latestWalkInCode}
-                </div>
-              </div>
-              <div className="border-l border-slate-800 pl-4">
-                <div className="text-[11px] font-medium text-slate-400 flex items-center gap-1">
-                  <Users className="h-3.5 w-3.5 text-amber-400" />
-                  จำนวนคิวรอทั้งหมด (คิว)
-                </div>
-                <div className="font-mono text-4xl sm:text-5xl font-black tracking-widest text-amber-400">
-                  {String(totalWaiting).padStart(2, '0')}
-                </div>
-              </div>
+
+            <div
+              aria-live="polite"
+              className="my-1 font-mono text-5xl sm:text-6xl font-black tracking-wider text-emerald-400 tabular-nums"
+            >
+              {currentServingCode}
+            </div>
+
+            <div className="text-[11px] text-slate-400">
+              {currentServing
+                ? currentServing.source === 'LINE'
+                  ? `เรียกแล้ว ${state?.repeatStatus.callCount ?? 1}/${
+                      state?.repeatStatus.maxCount ?? 3
+                    } ครั้ง`
+                  : 'ลูกค้าหน้าร้าน'
+                : 'ยังไม่มีคิวที่กำลังตัด'}
             </div>
           </div>
 
-          {/* ปุ่มกดหลัก 2 ปุ่ม (แทนปุ่มกด 22 มม. สีเขียวและสีน้ำเงินในเอกสารหน้า 6) */}
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {/* ปุ่มสีเขียว: เพิ่มคิวหน้าร้าน */}
-            <button
-              onClick={handleAddWalkIn}
-              disabled={loadingAction !== null}
-              className="group relative flex flex-col items-center justify-center rounded-3xl border-b-8 border-emerald-800 bg-gradient-to-b from-emerald-500 to-emerald-600 px-6 py-7 text-white shadow-lg transition-all hover:from-emerald-400 hover:to-emerald-500 active:translate-y-1 active:border-b-4 disabled:opacity-60"
-            >
-              <div className="mb-2 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 ring-4 ring-white/30 transition-transform group-hover:scale-105">
-                <Plus className="h-10 w-10 stroke-[3]" />
+          {/* คิวรอทั้งหมด & เลขคิวหน้าร้านล่าสุด */}
+          <div className="col-span-5 flex flex-col gap-2">
+            <div className="flex-1 flex flex-col justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+              <span className="text-[11px] font-semibold text-slate-500">
+                คิวรอทั้งหมด
+              </span>
+              <div className="flex items-baseline gap-1.5">
+                <span className="font-mono text-3xl font-black text-slate-900 tabular-nums">
+                  {String(totalWaiting).padStart(2, '0')}
+                </span>
+                <span className="text-xs font-semibold text-slate-500">คิว</span>
               </div>
-              <span className="text-2xl font-black tracking-tight">
-                + เพิ่มคิวหน้าร้าน
-              </span>
-              <span className="mt-1 text-xs font-medium text-emerald-100">
-                (แทนปุ่มกดสีเขียว • ออกเลขคิวใหม่ต่อท้ายคิวกลาง)
-              </span>
-            </button>
+            </div>
 
-            {/* ปุ่มสีน้ำเงิน: ไปคิวถัดไป / รันคิว */}
-            <button
-              onClick={handleNextQueue}
-              disabled={loadingAction !== null}
-              className="group relative flex flex-col items-center justify-center rounded-3xl border-b-8 border-blue-900 bg-gradient-to-b from-blue-500 to-blue-600 px-6 py-7 text-white shadow-lg transition-all hover:from-blue-400 hover:to-blue-500 active:translate-y-1 active:border-b-4 disabled:opacity-60"
+            <div
+              className={`flex-1 flex flex-col justify-center rounded-xl border px-3 py-2 transition-colors ${
+                popupActive
+                  ? 'border-amber-400 bg-amber-50'
+                  : 'border-slate-200 bg-slate-50'
+              }`}
             >
-              <div className="mb-2 flex h-16 w-16 items-center justify-center rounded-full bg-white/20 ring-4 ring-white/30 transition-transform group-hover:scale-105">
-                <FastForward className="h-9 w-9 stroke-[2.5]" />
+              <div className="flex items-center justify-between">
+                <span className="text-[11px] font-semibold text-slate-500">
+                  หน้าร้านล่าสุด
+                </span>
+                {popupActive && (
+                  <span className="rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                    ใหม่
+                  </span>
+                )}
               </div>
-              <span className="text-2xl font-black tracking-tight">
-                &gt;&gt; ไปคิวถัดไป (รันคิว)
+              <span className="font-mono text-2xl sm:text-3xl font-black text-amber-600 tabular-nums">
+                {latestWalkInCode}
               </span>
-              <span className="mt-1 text-xs font-medium text-blue-100">
-                (แทนปุ่มกดสีน้ำเงิน • ปิดคิวเดิม/ไม่มา และเรียกคิวถัดไป)
-              </span>
-            </button>
+            </div>
           </div>
+        </div>
 
-          {/* แถบปุ่มเรียกคิวซ้ำและสถานะการเรียกซ้ำ */}
-          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-slate-50 px-4 py-3 border border-slate-200">
-            <div className="text-xs text-slate-600">
-              {state?.currentServing ? (
-                state.currentServing.source === 'LINE' ? (
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-bold text-slate-900">
-                      สถานะเรียกคิว {state.currentServing.display_code} (LINE):
-                    </span>
-                    <span className="rounded-lg bg-blue-100 px-2 py-0.5 font-bold text-blue-800">
-                      เรียกแล้ว {state.repeatStatus.callCount}/
-                      {state.repeatStatus.maxCount} ครั้ง
-                    </span>
-                    {state.repeatStatus.isRepeatExhausted ? (
-                      <span className="text-amber-700 font-semibold">
-                        • แจ้งครบกำหนดแล้ว (ระบบไม่ข้ามคิวเอง รอช่างกดปุ่มสีน้ำเงิน)
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-slate-500">
-                        <Clock className="h-3.5 w-3.5" />
-                        เรียกซ้ำอัตโนมัติในอีก{' '}
-                        <strong>{state.repeatStatus.nextRepeatInSec ?? 0}</strong>{' '}
-                        วินาที
-                      </span>
-                    )}
-                  </div>
+        {/* แถบเรียกคิวซ้ำ แยกออกมาในโซนคิวปัจจุบัน กดง่าย ไม่ชนปุ่มข้ามคิว */}
+        {currentServing && (
+          <div className="mt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 rounded-xl bg-slate-100 p-2.5">
+            <div className="text-xs text-slate-700 px-1">
+              {currentServing.source === 'LINE' ? (
+                state?.repeatStatus.isRepeatExhausted ? (
+                  <span className="font-semibold text-amber-800">
+                    แจ้งเตือนครบ {state.repeatStatus.maxCount} ครั้งแล้ว (ไม่ข้ามคิวเอง รอช่างกดปุ่มคิวถัดไป)
+                  </span>
                 ) : (
-                  <span>
-                    คิวปัจจุบัน{' '}
-                    <strong className="text-slate-900">
-                      {state.currentServing.display_code}
-                    </strong>{' '}
-                    เป็นลูกค้าหน้าร้าน (ดูเลขคิวจากจอหน้าร้าน)
+                  <span className="inline-flex items-center gap-1.5 font-medium">
+                    <Clock className="h-3.5 w-3.5 text-slate-500 shrink-0" />
+                    <span>
+                      แจ้งเตือนซ้ำอัตโนมัติในอีก{' '}
+                      <strong className="tabular-nums">
+                        {state?.repeatStatus.nextRepeatInSec ?? 0}
+                      </strong>{' '}
+                      วินาที
+                    </span>
                   </span>
                 )
               ) : (
-                <span>
-                  ยังไม่มีคิวที่กำลังตัด กดปุ่มสีน้ำเงินเพื่อเริ่มเรียกคิวแรก
-                </span>
+                <span>กดปุ่มเรียกคิวซ้ำเพื่อส่งเสียงกระดิ่งที่จอหน้าร้าน</span>
               )}
             </div>
 
             <button
               onClick={handleRecall}
-              disabled={!state?.currentServing || loadingAction !== null}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-amber-500 px-3.5 py-2 text-xs font-bold text-white shadow-sm hover:bg-amber-600 disabled:opacity-40"
+              disabled={loadingAction !== null}
+              className="flex min-h-[44px] w-full sm:w-auto items-center justify-center gap-2 rounded-xl bg-white border border-slate-300 px-4 py-2.5 text-xs sm:text-sm font-bold text-slate-800 shadow-sm hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50 shrink-0"
             >
-              <BellRing className="h-4 w-4" />
-              กดเรียกคิวซ้ำเดี๋ยวนี้
+              <BellRing className="h-4 w-4 text-amber-600" />
+              <span>เรียกคิว {currentServing.display_code} ซ้ำ</span>
             </button>
           </div>
-        </div>
+        )}
+      </section>
 
-        {/* ฝั่งขวา: หน้าจอระบบจัดการคิวกลาง (ถอดแบบจากภาพหน้า 2 ของเอกสาร) */}
-        <div className="lg:col-span-5 flex flex-col justify-between rounded-3xl border-2 border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-            <div>
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
-                🖥️ ระบบจัดการคิวกลาง (Realtime)
-              </span>
-              <h2 className="mt-1.5 text-lg font-extrabold text-slate-900">
-                สถานะคิวที่กำลังตัด & คิวรวมทั้งหมด
-              </h2>
-            </div>
-            <button
-              onClick={fetchState}
-              className="rounded-xl p-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
-              title="รีเฟรชข้อมูล"
-            >
-              <RefreshCw className="h-4 w-4" />
-            </button>
+      {/* โซนที่ 2: ปุ่มกดหลัก 2 ปุ่ม (ออกแบบให้กดด้วยนิ้วโป้งบนจอมือถือแนวตั้งได้ถนัดมือ + กันกดข้ามคิวเบิ้ล) */}
+      <section className="grid grid-cols-2 gap-3">
+        <button
+          onClick={handleAddWalkIn}
+          disabled={loadingAction !== null}
+          className="flex min-h-[104px] flex-col items-center justify-center rounded-2xl bg-emerald-600 px-3 py-4 text-white shadow-md transition-transform hover:bg-emerald-500 active:scale-[0.98] disabled:opacity-60"
+        >
+          <div className="mb-1.5 flex h-11 w-11 items-center justify-center rounded-full bg-white/20">
+            <Plus className="h-7 w-7 stroke-[2.75]" />
           </div>
+          <span className="text-base sm:text-lg font-extrabold tracking-tight">
+            เพิ่มคิวหน้าร้าน
+          </span>
+          <span className="mt-0.5 text-[11px] font-medium text-emerald-100">
+            ออกเลขคิวใหม่ทันที
+          </span>
+        </button>
 
-          {/* วงกลมแสดงคิวที่กำลังตัดอยู่ปัจจุบัน (เหมือนวงกลมสีเขียว "012" ในเอกสารหน้า 2) */}
-          <div className="my-5 flex flex-col items-center justify-center rounded-3xl bg-gradient-to-br from-emerald-50 via-white to-emerald-50 p-6 border border-emerald-200">
-            <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">
-              คิวที่กำลังให้บริการอยู่ (Current Queue)
+        <button
+          onClick={handleNextQueue}
+          disabled={loadingAction !== null || nextCooldown > 0}
+          className="flex min-h-[104px] flex-col items-center justify-center rounded-2xl bg-blue-600 px-3 py-4 text-white shadow-md transition-transform hover:bg-blue-500 active:scale-[0.98] disabled:bg-slate-400 disabled:opacity-80"
+        >
+          <div className="mb-1.5 flex h-11 w-11 items-center justify-center rounded-full bg-white/20">
+            <FastForward className="h-6 w-6 stroke-[2.5]" />
+          </div>
+          <span className="text-base sm:text-lg font-extrabold tracking-tight">
+            {nextCooldown > 0
+              ? `กันกดซ้ำ (${nextCooldown} วิ)`
+              : 'ไปคิวถัดไป'}
+          </span>
+          <span className="mt-0.5 text-[11px] font-medium text-blue-100">
+            {nextCooldown > 0
+              ? 'เพิ่งเปลี่ยนคิวเมื่อสักครู่'
+              : 'ปิดคิวนี้และเรียกคิวหน้า'}
+          </span>
+        </button>
+      </section>
+
+      {/* โซนที่ 3: รายการคิวที่กำลังรอ (รวมไว้จุดเดียว ไม่ซ้ำซ้อน พร้อมปุ่มยกเลิกคิวรายแถว) */}
+      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
+          <h2 className="text-sm font-bold text-slate-900">
+            คิวที่กำลังรอ ({totalWaiting})
+          </h2>
+          <div className="flex items-center gap-1.5 text-xs font-semibold">
+            <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-amber-800 border border-amber-200">
+              <Store className="h-3 w-3 text-amber-600" />
+              หน้าร้าน {state?.walkInWaitingQueues.length ?? 0}
             </span>
-            <div className="mt-2 flex h-32 w-32 items-center justify-center rounded-full bg-emerald-600 text-white shadow-xl ring-8 ring-emerald-100">
-              <span className="font-mono text-4xl font-black tracking-wider">
-                {currentServingCode}
-              </span>
-            </div>
-            <div className="mt-3 text-sm font-semibold text-slate-700">
-              {state?.currentServing ? (
-                <span className="inline-flex items-center gap-1.5">
-                  {state.currentServing.source === 'LINE' ? (
-                    <>
-                      <MessageCircle className="h-4 w-4 text-emerald-600" />
-                      ลูกค้าจองผ่าน LINE OA
-                    </>
-                  ) : (
-                    <>
-                      <Store className="h-4 w-4 text-amber-600" />
-                      ลูกค้าหน้าร้าน (Walk-in)
-                    </>
-                  )}
-                </span>
-              ) : (
-                <span className="text-slate-400">
-                  ว่าง • กดปุ่ม &quot;ไปคิวถัดไป&quot; เพื่อเรียกคิว
-                </span>
-              )}
-            </div>
-          </div>
-
-          {/* สรุปแยกตามประเภทคิวเหมือนรูปในเอกสารหน้า 2: คิวหน้าร้าน vs คิวออนไลน์ */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-amber-200 bg-amber-50/60 p-3.5">
-              <div className="flex items-center justify-between">
-                <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-900">
-                  <Store className="h-3.5 w-3.5 text-amber-600" />
-                  คิวหน้าร้านรออยู่
-                </span>
-                <span className="rounded-full bg-amber-200/80 px-2 py-0.5 text-xs font-extrabold text-amber-900">
-                  {state?.walkInWaitingQueues.length ?? 0} คิว
-                </span>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {state?.walkInWaitingQueues.length ? (
-                  state.walkInWaitingQueues.slice(0, 6).map((q) => (
-                    <span
-                      key={q.id}
-                      className="rounded-lg bg-white px-2.5 py-1 font-mono text-sm font-bold text-amber-900 shadow-sm ring-1 ring-amber-300"
-                    >
-                      {q.display_code}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-xs text-amber-700/70">ไม่มีคิวรอ</span>
-                )}
-              </div>
-            </div>
-
-            <div className="rounded-2xl border border-emerald-200 bg-emerald-50/60 p-3.5">
-              <div className="flex items-center justify-between">
-                <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-900">
-                  <MessageCircle className="h-3.5 w-3.5 text-emerald-600" />
-                  คิวออนไลน์ (LINE) รออยู่
-                </span>
-                <span className="rounded-full bg-emerald-200/80 px-2 py-0.5 text-xs font-extrabold text-emerald-900">
-                  {state?.lineWaitingQueues.length ?? 0} คิว
-                </span>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {state?.lineWaitingQueues.length ? (
-                  state.lineWaitingQueues.slice(0, 6).map((q) => (
-                    <span
-                      key={q.id}
-                      className="rounded-lg bg-white px-2.5 py-1 font-mono text-sm font-bold text-emerald-900 shadow-sm ring-1 ring-emerald-300"
-                    >
-                      {q.display_code}
-                    </span>
-                  ))
-                ) : (
-                  <span className="text-xs text-emerald-700/70">ไม่มีคิวรอ</span>
-                )}
-              </div>
-            </div>
+            <span className="inline-flex items-center gap-1 rounded-md bg-emerald-50 px-2 py-0.5 text-emerald-800 border border-emerald-200">
+              <MessageCircle className="h-3 w-3 text-emerald-600" />
+              LINE {state?.lineWaitingQueues.length ?? 0}
+            </span>
           </div>
         </div>
-      </div>
 
-      {/* ส่วนล่าง: ตารางคิวรวมที่กำลังรอเรียงตามลำดับ + ประวัติการแจ้งเตือน LINE */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-12">
-        {/* คิวรวมที่กำลังรอ */}
-        <div className="lg:col-span-7 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-base font-extrabold text-slate-900">
-                📋 รายการคิวรวมที่กำลังรอ ({totalWaiting} คิว)
-              </h3>
-              <p className="text-xs text-slate-500">
-                เรียงลำดับตามเวลาที่รับคิว (คิวที่ยกเลิกจะถูกตัดออกจากการนับคิวข้างหน้าอัตโนมัติ)
-              </p>
-            </div>
+        {state?.waitingQueues.length ? (
+          <div className="divide-y divide-slate-100 mt-1">
+            {state.waitingQueues.map((q, idx) => {
+              const isConfirming = confirmCancelId === q.id;
+              return (
+                <div
+                  key={q.id}
+                  className="flex items-center justify-between gap-2 py-2.5"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <span className="w-6 text-xs font-mono font-bold text-slate-400 tabular-nums">
+                      #{idx + 1}
+                    </span>
+                    <span className="rounded-lg bg-slate-900 px-2.5 py-1 font-mono text-base font-black text-white tabular-nums">
+                      {q.display_code}
+                    </span>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        {q.source === 'LINE' ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-bold text-emerald-700">
+                            <MessageCircle className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">
+                              {q.customer_label || 'ลูกค้า LINE'}
+                            </span>
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1 text-xs font-bold text-amber-700">
+                            <Store className="h-3.5 w-3.5 shrink-0" />
+                            <span>หน้าร้าน</span>
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-[11px] text-slate-500">
+                        รออีก {q.queuesAhead} คิว
+                        {q.notifiedNear2
+                          ? ' • แจ้งเตือนใกล้ถึงคิวแล้ว'
+                          : q.notifiedNear1
+                          ? ' • แจ้งเตือนล่วงหน้าแล้ว'
+                          : ''}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* ปุ่มยกเลิกคิวรายแถว พร้อมยืนยัน 2 จังหวะกันนิ้วพลาดตอนเลื่อนจอ */}
+                  <div className="shrink-0">
+                    {!isConfirming ? (
+                      <button
+                        onClick={() => setConfirmCancelId(q.id)}
+                        disabled={loadingAction !== null}
+                        className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-600 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-700"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                        <span>ยกเลิก</span>
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleCancelRow(q.id, q.display_code)}
+                          disabled={loadingAction !== null}
+                          className="rounded-lg bg-rose-600 px-2.5 py-1.5 text-xs font-bold text-white hover:bg-rose-700"
+                        >
+                          ยืนยันลบ
+                        </button>
+                        <button
+                          onClick={() => setConfirmCancelId(null)}
+                          className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-600"
+                        >
+                          ปิด
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
+        ) : (
+          <div className="py-8 text-center text-xs sm:text-sm text-slate-400">
+            ยังไม่มีคิวที่กำลังรอในขณะนี้
+          </div>
+        )}
+      </section>
 
-          {state?.waitingQueues.length ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 text-xs font-bold uppercase text-slate-500">
-                    <th className="py-2.5 pr-3">ลำดับรอ</th>
-                    <th className="py-2.5 px-3">หมายเลขคิว</th>
-                    <th className="py-2.5 px-3">ช่องทาง</th>
-                    <th className="py-2.5 px-3">คิวข้างหน้า</th>
-                    <th className="py-2.5 pl-3">สถานะแจ้งเตือน LINE</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {state.waitingQueues.map((q, idx) => (
-                    <tr key={q.id} className="hover:bg-slate-50/80">
-                      <td className="py-3 pr-3 font-mono text-xs font-bold text-slate-500">
-                        #{idx + 1}
-                      </td>
-                      <td className="py-3 px-3">
-                        <span className="inline-flex items-center rounded-xl bg-slate-900 px-3 py-1 font-mono text-base font-black text-white">
-                          {q.display_code}
-                        </span>
-                      </td>
-                      <td className="py-3 px-3">
-                        {q.source === 'LINE' ? (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-bold text-emerald-800">
-                            <MessageCircle className="h-3.5 w-3.5" />
-                            LINE OA
-                            {q.customer_label ? ` (${q.customer_label})` : ''}
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-bold text-amber-800">
-                            <Store className="h-3.5 w-3.5" />
-                            หน้าร้าน
-                          </span>
-                        )}
-                      </td>
-                      <td className="py-3 px-3 font-semibold text-slate-700">
-                        เหลือ {q.queuesAhead} คิว
-                      </td>
-                      <td className="py-3 pl-3 text-xs">
-                        {q.source === 'LINE' ? (
-                          <div className="flex flex-wrap gap-1">
-                            {q.notifiedNear1 && (
-                              <span className="rounded-md bg-blue-50 px-2 py-0.5 font-medium text-blue-700 ring-1 ring-blue-200">
-                                เตือนระยะแรกแล้ว
-                              </span>
-                            )}
-                            {q.notifiedNear2 && (
-                              <span className="rounded-md bg-amber-50 px-2 py-0.5 font-medium text-amber-700 ring-1 ring-amber-200">
-                                เตือนใกล้ถึงคิวแล้ว
-                              </span>
-                            )}
-                            {!q.notifiedNear1 && !q.notifiedNear2 && (
-                              <span className="text-slate-400">รอถึงเกณฑ์เตือน</span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-slate-400">ดูจอหน้าร้าน</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed border-slate-200 py-10 text-center text-sm text-slate-500">
-              ยังไม่มีคิวที่กำลังรอในขณะนี้
-              <br />
-              <span className="text-xs text-slate-400">
-                สามารถกดปุ่มสีเขียว &quot;+ เพิ่มคิวหน้าร้าน&quot; หรือจำลองลูกค้ากดรับคิวจากหน้า LINE OA ได้เลย
-              </span>
-            </div>
-          )}
+      {/* โซนที่ 4: ลิ้นชักพับเก็บประวัติคิวและบันทึกแจ้งเตือน LINE เพื่อไม่ให้รกหน้าจอมือถือ */}
+      <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-xs sm:text-sm font-bold text-slate-700">
+          <span>
+            ประวัติคิววันนี้ & บันทึกการแจ้งเตือน LINE (
+            {state?.recentNotifications.length ?? 0})
+          </span>
+          <ChevronDown className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
+        </summary>
 
-          {/* ประวัติคิวที่ปิดหรือยกเลิกแล้วล่าสุด */}
-          {state?.recentHistory && state.recentHistory.length > 0 && (
-            <div className="mt-6 border-t border-slate-100 pt-4">
-              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2.5">
-                ประวัติคิวที่เสร็จสิ้น / ยกเลิกล่าสุดวันนี้
-              </h4>
-              <div className="flex flex-wrap gap-2">
+        <div className="border-t border-slate-100 p-4 space-y-4">
+          {/* ประวัติคิวที่ปิดหรือยกเลิกแล้ว */}
+          <div>
+            <h3 className="text-xs font-bold text-slate-500 mb-2">
+              คิวที่เสร็จสิ้น / ยกเลิกล่าสุดวันนี้
+            </h3>
+            {state?.recentHistory && state.recentHistory.length > 0 ? (
+              <div className="flex flex-wrap gap-1.5">
                 {state.recentHistory.map((h) => (
-                  <div
+                  <span
                     key={h.id}
-                    className={`inline-flex items-center gap-1.5 rounded-xl px-2.5 py-1 text-xs font-semibold ${
+                    className={`inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs font-semibold tabular-nums ${
                       h.status === 'COMPLETED'
                         ? 'bg-slate-100 text-slate-700'
                         : 'bg-rose-50 text-rose-700 line-through'
                     }`}
                   >
                     {h.status === 'COMPLETED' ? (
-                      <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+                      <CheckCircle2 className="h-3 w-3 text-emerald-600" />
                     ) : (
-                      <XCircle className="h-3.5 w-3.5 text-rose-500" />
+                      <XCircle className="h-3 w-3 text-rose-500" />
                     )}
-                    <span className="font-mono font-bold">{h.display_code}</span>
-                    <span className="text-[11px] opacity-75">
-                      ({h.status === 'COMPLETED' ? 'ปิดคิวแล้ว' : 'ลูกค้ายกเลิก'})
+                    <span className="font-mono font-bold">
+                      {h.display_code}
                     </span>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400">ยังไม่มีประวัติคิวในวันนี้</p>
+            )}
+          </div>
+
+          {/* บันทึกการแจ้งเตือน LINE */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <h3 className="text-xs font-bold text-slate-500">
+                ข้อความแจ้งเตือน LINE ล่าสุด
+              </h3>
+              <Link
+                href="/line-simulator"
+                className="text-xs font-bold text-emerald-600 hover:underline"
+              >
+                เปิดหน้าจำลอง LINE
+              </Link>
+            </div>
+
+            {state?.recentNotifications.length ? (
+              <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                {state.recentNotifications.slice(0, 10).map((log) => (
+                  <div
+                    key={log.id}
+                    className="rounded-xl border border-slate-100 bg-slate-50 p-2.5 text-xs"
+                  >
+                    <div className="flex items-center justify-between gap-2 mb-0.5">
+                      <span className="font-mono font-bold text-slate-900 tabular-nums">
+                        คิว {log.display_code}
+                      </span>
+                      <span className="text-[10px] text-slate-400 tabular-nums">
+                        {new Date(log.created_at).toLocaleTimeString('th-TH')}
+                      </span>
+                    </div>
+                    <p className="text-slate-600">{log.message}</p>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
-        </div>
-
-        {/* ประวัติการส่งข้อความแจ้งเตือน LINE ล่าสุด */}
-        <div className="lg:col-span-5 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-base font-extrabold text-slate-900">
-                💬 บันทึกการแจ้งเตือน LINE อัตโนมัติ
-              </h3>
-              <p className="text-xs text-slate-500">
-                แจ้งเตือนเมื่อเหลือ {state?.settings.notify_ahead_first ?? 3} คิว,{' '}
-                {state?.settings.notify_ahead_second ?? 1} คิว, ถึงคิว และเรียกซ้ำ
+            ) : (
+              <p className="text-xs text-slate-400">
+                ยังไม่มีประวัติการแจ้งเตือน LINE
               </p>
-            </div>
-            <Link
-              href="/line-simulator"
-              className="text-xs font-bold text-emerald-600 hover:underline"
-            >
-              เปิดจำลอง LINE ลูกค้า &rarr;
-            </Link>
+            )}
           </div>
-
-          {state?.recentNotifications.length ? (
-            <div className="space-y-2.5 max-h-[380px] overflow-y-auto pr-1">
-              {state.recentNotifications.map((log) => (
-                <div
-                  key={log.id}
-                  className="rounded-2xl border border-slate-100 bg-slate-50/70 p-3 text-xs"
-                >
-                  <div className="flex items-center justify-between gap-2 mb-1">
-                    <span className="inline-flex items-center gap-1.5 font-bold text-slate-900">
-                      <span className="rounded bg-slate-900 px-1.5 py-0.5 font-mono text-white">
-                        {log.display_code}
-                      </span>
-                      <span>
-                        {log.trigger_type === 'BOOKED' && 'รับคิวใหม่'}
-                        {log.trigger_type === 'NEAR_1' && 'เตือนล่วงหน้าระยะที่ 1'}
-                        {log.trigger_type === 'NEAR_2' && 'เตือนล่วงหน้าระยะที่ 2'}
-                        {log.trigger_type === 'CALLED' && 'เรียกเข้ารับบริการ'}
-                        {log.trigger_type === 'RECALL' && 'เรียกคิวซ้ำ'}
-                        {log.trigger_type === 'CANCELLED' && 'ยกเลิกคิว'}
-                      </span>
-                    </span>
-                    <span className="text-[11px] text-slate-400">
-                      {new Date(log.created_at).toLocaleTimeString('th-TH')}
-                    </span>
-                  </div>
-                  <p className="text-slate-600 leading-relaxed">{log.message}</p>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="rounded-2xl border border-dashed border-slate-200 py-10 text-center text-xs text-slate-400">
-              ยังไม่มีประวัติการส่งข้อความแจ้งเตือน LINE
-            </div>
-          )}
         </div>
-      </div>
+      </details>
     </div>
   );
 }
-

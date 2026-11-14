@@ -2,13 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import {
-  Scissors,
-  Monitor,
-  MessageSquare,
-  Settings,
-  Radio,
-} from 'lucide-react';
+import { Scissors, Monitor, MessageSquare, Settings } from 'lucide-react';
 
 export default function TopNav() {
   const pathname = usePathname();
@@ -16,50 +10,46 @@ export default function TopNav() {
   const navItems = [
     {
       href: '/barber',
-      label: 'แผงควบคุมช่าง (แทนปุ่มจริง)',
+      label: 'คิวช่าง',
+      fullLabel: 'แผงควบคุมช่าง',
       icon: Scissors,
     },
     {
       href: '/display',
-      label: 'จอหน้าร้าน (แทนจอ P10)',
+      label: 'จอร้าน',
+      fullLabel: 'จอหน้าร้าน',
       icon: Monitor,
     },
     {
       href: '/line-simulator',
-      label: 'LINE OA ลูกค้า (จำลอง & Webhook)',
+      label: 'LINE',
+      fullLabel: 'จำลอง LINE ลูกค้า',
       icon: MessageSquare,
     },
     {
       href: '/settings',
-      label: 'ตั้งค่ากติกาแจ้งเตือน',
+      label: 'ตั้งค่า',
+      fullLabel: 'ตั้งค่าแจ้งเตือน',
       icon: Settings,
     },
   ];
 
   return (
-    <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur">
-      <div className="mx-auto flex max-w-7xl flex-wrap items-center justify-between gap-3 px-4 py-3">
-        <Link href="/barber" className="flex items-center gap-2.5">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-600 text-white shadow-sm">
-            <Scissors className="h-5 w-5" />
+    <header className="sticky top-0 z-40 border-b border-slate-200 bg-white">
+      <div className="mx-auto flex h-14 max-w-5xl items-center justify-between gap-2 px-3 sm:px-4">
+        <Link
+          href="/barber"
+          className="flex items-center gap-2 shrink-0 text-slate-900"
+        >
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-600 text-white">
+            <Scissors className="h-4 w-4" />
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="text-base font-bold tracking-tight text-slate-900">
-                ระบบจองคิวร้านตัดผม
-              </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700 ring-1 ring-inset ring-emerald-600/20">
-                <Radio className="h-3 w-3 animate-pulse" />
-                Phase 1: Web + LINE OA
-              </span>
-            </div>
-            <p className="text-xs text-slate-500">
-              เซิร์ฟเวอร์คิวกลาง • เว็บแทนปุ่มกดจริง & จอหน้าร้าน • แจ้งเตือนผ่าน LINE
-            </p>
-          </div>
+          <span className="text-sm sm:text-base font-bold tracking-tight">
+            คิวร้านตัดผม
+          </span>
         </Link>
 
-        <nav className="flex flex-wrap items-center gap-1.5">
+        <nav className="flex items-center gap-1 overflow-x-auto">
           {navItems.map((item) => {
             const Icon = item.icon;
             const isActive =
@@ -69,14 +59,15 @@ export default function TopNav() {
               <Link
                 key={item.href}
                 href={item.href}
-                className={`flex items-center gap-2 rounded-xl px-3.5 py-2 text-sm font-semibold transition-all ${
+                className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap ${
                   isActive
-                    ? 'bg-slate-900 text-white shadow-sm'
+                    ? 'bg-slate-900 text-white'
                     : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
                 }`}
               >
-                <Icon className="h-4 w-4" />
-                <span>{item.label}</span>
+                <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4 shrink-0" />
+                <span className="sm:hidden">{item.label}</span>
+                <span className="hidden sm:inline">{item.fullLabel}</span>
               </Link>
             );
           })}
@@ -85,4 +76,3 @@ export default function TopNav() {
     </header>
   );
 }
-

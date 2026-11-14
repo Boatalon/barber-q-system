@@ -4,10 +4,10 @@ import { useEffect, useState } from 'react';
 import {
   Save,
   RotateCcw,
-  Bell,
   Clock,
   CheckCircle2,
   AlertTriangle,
+  AlertCircle,
 } from 'lucide-react';
 import type { ShopSettings } from '@/lib/db';
 
@@ -24,6 +24,7 @@ export default function SettingsPage() {
   const [resetting, setResetting] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [savedBanner, setSavedBanner] = useState<string | null>(null);
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
   useEffect(() => {
     fetch('/api/settings', { cache: 'no-store' })
@@ -40,13 +41,24 @@ export default function SettingsPage() {
           });
         }
       })
-      .catch(console.error);
+      .catch(() => {
+        setErrorBanner('ไม่สามารถโหลดข้อมูลการตั้งค่าได้');
+      });
   }, []);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    setSaving(true);
     setSavedBanner(null);
+    setErrorBanner(null);
+
+    if (form.notify_ahead_first <= form.notify_ahead_second) {
+      setErrorBanner(
+        'ระยะเตือนล่วงหน้าครั้งที่ 1 ต้องมีจำนวนคิวมากกว่าครั้งที่ 2 (เช่น 3 คิว และ 1 คิว)'
+      );
+      return;
+    }
+
+    setSaving(true);
     try {
       const res = await fetch('/api/settings', {
         method: 'PUT',
@@ -54,9 +66,13 @@ export default function SettingsPage() {
         body: JSON.stringify(form),
       });
       if (res.ok) {
-        setSavedBanner('บันทึกการตั้งค่ากติกาการแจ้งเตือนเรียบร้อยแล้ว!');
+        setSavedBanner('บันทึกการตั้งค่าเรียบร้อยแล้ว');
         setTimeout(() => setSavedBanner(null), 4000);
+      } else {
+        setErrorBanner('ไม่สามารถบันทึกการตั้งค่าได้');
       }
+    } catch {
+      setErrorBanner('การเชื่อมต่อขัดข้อง ไม่สามารถบันทึกการตั้งค่าได้');
     } finally {
       setSaving(false);
     }
@@ -64,67 +80,87 @@ export default function SettingsPage() {
 
   const handleResetQueues = async () => {
     setResetting(true);
+    setErrorBanner(null);
     try {
       const res = await fetch('/api/queue/reset', { method: 'POST' });
       if (res.ok) {
         setConfirmReset(false);
         setSavedBanner('รีเซ็ตหมายเลขคิวทั้งหมดของวันนี้เรียบร้อยแล้ว (เริ่มที่ 001 ใหม่)');
         setTimeout(() => setSavedBanner(null), 4000);
+      } else {
+        setErrorBanner('ไม่สามารถรีเซ็ตคิวได้');
       }
+    } catch {
+      setErrorBanner('การเชื่อมต่อขัดข้อง ไม่สามารถรีเซ็ตคิวได้');
     } finally {
       setResetting(false);
     }
   };
 
   return (
-    <div className="mx-auto max-w-4xl px-4 py-8 space-y-6">
+    <div className="mx-auto max-w-xl px-3 py-4 sm:py-6 space-y-4">
       {savedBanner && (
-        <div className="flex items-center gap-2.5 rounded-2xl bg-emerald-600 px-5 py-3.5 text-sm font-bold text-white shadow-md">
-          <CheckCircle2 className="h-5 w-5 shrink-0" />
+        <div
+          role="status"
+          aria-live="polite"
+          className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-xs sm:text-sm font-bold text-white shadow-sm"
+        >
+          <CheckCircle2 className="h-4 w-4 shrink-0" />
           <span>{savedBanner}</span>
         </div>
       )}
 
-      <div className="rounded-3xl border border-slate-200 bg-white p-6 sm:p-8 shadow-sm">
-        <div className="border-b border-slate-100 pb-4">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">
-            <Bell className="h-3.5 w-3.5" />
-            ตั้งค่าระบบและกติกาการแจ้งเตือนลูกค้า
-          </span>
-          <h1 className="mt-1.5 text-xl font-extrabold text-slate-900">
-            ปรับค่ากติกาการแจ้งเตือนผ่าน LINE และจอหน้าร้าน
+      {errorBanner && (
+        <div
+          role="alert"
+          className="flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-3 text-xs sm:text-sm font-bold text-white shadow-sm"
+        >
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{errorBanner}</span>
+        </div>
+      )}
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-sm">
+        <div className="border-b border-slate-100 pb-3">
+          <h1 className="text-base sm:text-lg font-bold text-slate-900">
+            ตั้งค่าการแจ้งเตือนลูกค้า
           </h1>
           <p className="text-xs text-slate-500">
-            ตามข้อกำหนดในเอกสาร: สามารถปรับค่ากติกาการแจ้งเตือนสำหรับลูกค้าและการเรียกซ้ำได้
+            กำหนดระยะคิวแจ้งเตือนผ่าน LINE และการเรียกคิวซ้ำอัตโนมัติ
           </p>
         </div>
 
-        <form onSubmit={handleSave} className="mt-6 space-y-6">
+        <form onSubmit={handleSave} className="mt-4 space-y-4">
           <div>
-            <label className="block text-sm font-bold text-slate-800">
-              ชื่อร้านตัดผม (แสดงบนจอหน้าร้านและบัตรคิวใน LINE)
+            <label
+              htmlFor="shop_name"
+              className="block text-xs sm:text-sm font-bold text-slate-800"
+            >
+              ชื่อร้านตัดผม
             </label>
             <input
+              id="shop_name"
               type="text"
               value={form.shop_name}
               onChange={(e) =>
                 setForm((prev) => ({ ...prev, shop_name: e.target.value }))
               }
-              className="mt-1.5 w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-900 focus:border-emerald-600 focus:outline-none"
+              className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm font-semibold text-slate-900 focus:border-emerald-600"
             />
           </div>
 
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-              <label className="block text-sm font-bold text-slate-800">
-                แจ้งเตือนล่วงหน้าระยะที่ 1 (เมื่อเหลือกี่คิวข้างหน้า)
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label
+                htmlFor="notify_ahead_first"
+                className="block text-xs sm:text-sm font-bold text-slate-800"
+              >
+                เตือนล่วงหน้าครั้งที่ 1 (เหลือกี่คิว)
               </label>
-              <p className="text-xs text-slate-500 mt-0.5">
-                ค่ามาตรฐานตามเอกสาร: เหลือ 3 คิวก่อนถึงลำดับ
-              </p>
               <input
+                id="notify_ahead_first"
                 type="number"
-                min={1}
+                min={2}
                 max={20}
                 value={form.notify_ahead_first}
                 onChange={(e) =>
@@ -133,18 +169,19 @@ export default function SettingsPage() {
                     notify_ahead_first: Number(e.target.value),
                   }))
                 }
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 font-mono text-base font-bold text-slate-900"
+                className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
               />
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-              <label className="block text-sm font-bold text-slate-800">
-                แจ้งเตือนล่วงหน้าระยะที่ 2 (เมื่อเหลือกี่คิวข้างหน้า)
+            <div>
+              <label
+                htmlFor="notify_ahead_second"
+                className="block text-xs sm:text-sm font-bold text-slate-800"
+              >
+                เตือนใกล้ถึงคิวครั้งที่ 2 (เหลือกี่คิว)
               </label>
-              <p className="text-xs text-slate-500 mt-0.5">
-                ค่ามาตรฐานตามเอกสาร: เหลือ 1 คิวก่อนถึงลำดับ
-              </p>
               <input
+                id="notify_ahead_second"
                 type="number"
                 min={1}
                 max={10}
@@ -155,21 +192,22 @@ export default function SettingsPage() {
                     notify_ahead_second: Number(e.target.value),
                   }))
                 }
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 font-mono text-base font-bold text-slate-900"
+                className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
               />
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-5 sm:grid-cols-3">
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-              <label className="block text-sm font-bold text-slate-800 flex items-center gap-1.5">
-                <Clock className="h-4 w-4 text-emerald-600" />
-                ระยะเวลาเรียกซ้ำ (วินาที)
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <label
+                htmlFor="repeat_call_interval_sec"
+                className="block text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1"
+              >
+                <Clock className="h-3.5 w-3.5 text-emerald-600" />
+                <span>ระยะเวลาเรียกซ้ำ (วินาที)</span>
               </label>
-              <p className="text-xs text-slate-500 mt-0.5">
-                ส่ง LINE เรียกซ้ำทุกกี่วินาทีเมื่อถึงคิว (ต่ำสุด 10 วินาที)
-              </p>
               <input
+                id="repeat_call_interval_sec"
                 type="number"
                 min={10}
                 max={600}
@@ -180,18 +218,19 @@ export default function SettingsPage() {
                     repeat_call_interval_sec: Number(e.target.value),
                   }))
                 }
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 font-mono text-base font-bold text-slate-900"
+                className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
               />
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-              <label className="block text-sm font-bold text-slate-800">
+            <div>
+              <label
+                htmlFor="repeat_call_max_count"
+                className="block text-xs sm:text-sm font-bold text-slate-800"
+              >
                 จำนวนครั้งเรียกซ้ำสูงสุด
               </label>
-              <p className="text-xs text-slate-500 mt-0.5">
-                เมื่อครบแล้วจะหยุดส่งเตือน และไม่ข้ามคิวเอง
-              </p>
               <input
+                id="repeat_call_max_count"
                 type="number"
                 min={1}
                 max={10}
@@ -202,79 +241,57 @@ export default function SettingsPage() {
                     repeat_call_max_count: Number(e.target.value),
                   }))
                 }
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 font-mono text-base font-bold text-slate-900"
-              />
-            </div>
-
-            <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4">
-              <label className="block text-sm font-bold text-slate-800">
-                เวลาโชว์คิวใหม่บนจอร้าน (วินาที)
-              </label>
-              <p className="text-xs text-slate-500 mt-0.5">
-                แสดงเลขคิวใหม่ชั่วครู่เมื่อช่างกดเพิ่มคิวหน้าร้าน
-              </p>
-              <input
-                type="number"
-                min={3}
-                max={30}
-                value={form.walkin_popup_duration_sec}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    walkin_popup_duration_sec: Number(e.target.value),
-                  }))
-                }
-                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-2.5 font-mono text-base font-bold text-slate-900"
+                className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
               />
             </div>
           </div>
 
-          <div className="flex items-center justify-end pt-2">
+          <div className="pt-2">
             <button
               type="submit"
               disabled={saving}
-              className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-6 py-3 text-sm font-extrabold text-white shadow-md hover:bg-emerald-700 disabled:opacity-50"
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
             >
               <Save className="h-4 w-4" />
-              {saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}
+              <span>{saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}</span>
             </button>
           </div>
         </form>
       </div>
 
-      {/* ส่วนรีเซ็ตคิวเริ่มวันใหม่ */}
-      <div className="rounded-3xl border border-rose-200 bg-rose-50/50 p-6 shadow-sm">
-        <div className="flex flex-wrap items-center justify-between gap-4">
+      {/* รีเซ็ตคิวเริ่มวันใหม่ */}
+      <div className="rounded-2xl border border-rose-200 bg-rose-50/60 p-4 sm:p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h2 className="text-base font-extrabold text-rose-900 flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-rose-600" />
-              รีเซ็ตหมายเลขคิวทั้งหมดของวันนี้ (เริ่มนับ 001 ใหม่)
+            <h2 className="text-sm font-bold text-rose-900 flex items-center gap-1.5">
+              <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+              <span>รีเซ็ตคิวทั้งหมดของวันนี้</span>
             </h2>
-            <p className="mt-1 text-xs text-rose-700">
-              ใช้สำหรับล้างคิวเมื่อเริ่มวันใหม่ หรือต้องการล้างข้อมูลเพื่อเริ่มทดสอบรอบใหม่
+            <p className="mt-0.5 text-xs text-rose-700">
+              ล้างคิวเพื่อเริ่มนับ 001 ใหม่สำหรับวันถัดไป
             </p>
           </div>
 
           {!confirmReset ? (
             <button
               onClick={() => setConfirmReset(true)}
-              className="inline-flex items-center gap-2 rounded-2xl border border-rose-300 bg-white px-4 py-2.5 text-xs font-extrabold text-rose-700 hover:bg-rose-100"
+              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-300 bg-white px-3.5 py-2.5 text-xs font-bold text-rose-700 hover:bg-rose-100 shrink-0"
             >
-              <RotateCcw className="h-4 w-4" />
-              รีเซ็ตคิววันนี้
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>รีเซ็ตคิววันนี้</span>
             </button>
           ) : (
             <div className="flex items-center gap-2">
               <button
                 onClick={handleResetQueues}
                 disabled={resetting}
-                className="inline-flex items-center gap-1.5 rounded-xl bg-rose-600 px-4 py-2.5 text-xs font-extrabold text-white hover:bg-rose-700"
+                className="flex-1 sm:flex-initial rounded-xl bg-rose-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-rose-700"
               >
-                ยืนยันล้างคิวทั้งหมด
+                ยืนยันล้างคิว
               </button>
               <button
                 onClick={() => setConfirmReset(false)}
-                className="rounded-xl bg-white px-3 py-2.5 text-xs font-bold text-slate-600 border border-slate-200"
+                className="rounded-xl bg-white px-3 py-2.5 text-xs font-semibold text-slate-600 border border-slate-200"
               >
                 ยกเลิก
               </button>
@@ -285,4 +302,3 @@ export default function SettingsPage() {
     </div>
   );
 }
-

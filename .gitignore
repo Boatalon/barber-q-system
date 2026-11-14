@@ -25,5 +25,11 @@ yarn-error.log*
 .env*.local
 .env
 
+# impeccable local binaries & state
+.agents/skills/impeccable/scripts/bin/
+.impeccable/config.local.json
+.impeccable/critique/
+
+
 # other
 ระบบจองคิวร้านตัดผม.pdf

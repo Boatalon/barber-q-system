@@ -546,6 +546,71 @@ export async function cancelLineQueue(lineUserId: string): Promise<{
 }
 
 /**
+ * ช่างกดยกเลิกคิวรายแถวจากตารางคิวรอ (รองรับทั้งคิวหน้าร้านและคิว LINE)
+ */
+export async function cancelQueueById(queueId: number): Promise<{
+  cancelled: boolean;
+  queue: QueueRow | null;
+  reason?: string;
+}> {
+  const supabase = getSupabase();
+  const today = getTodayDateString();
+  const settings = await getSettings();
+
+  const { data: target } = await supabase
+    .from('queues')
+    .select('*')
+    .eq('id', queueId)
+    .eq('status', 'WAITING')
+    .maybeSingle();
+
+  if (!target) {
+    return {
+      cancelled: false,
+      queue: null,
+      reason: 'ไม่พบคิวที่ต้องการยกเลิก หรือคิวนี้ไม่ได้อยู่ในสถานะรอ',
+    };
+  }
+
+  const targetRow = target as QueueRow;
+  const nowIso = new Date().toISOString();
+
+  const { data: updatedRow } = await supabase
+    .from('queues')
+    .update({ status: 'CANCELLED', closed_at: nowIso })
+    .eq('id', targetRow.id)
+    .select('*')
+    .single();
+
+  if (targetRow.source === 'LINE' && targetRow.line_user_id) {
+    const { serving } = await getActiveQueuesWithPosition(today);
+    await sendLineNotification({
+      queueId: targetRow.id,
+      displayCode: targetRow.display_code,
+      lineUserId: targetRow.line_user_id,
+      triggerType: 'CANCELLED',
+      message: `คิวหมายเลข ${targetRow.display_code} ถูกยกเลิกแล้วครับ`,
+      flexPayload: {
+        shopName: settings.shop_name,
+        myQueueCode: targetRow.display_code,
+        myStatus: 'CANCELLED',
+        currentServingCode: serving?.display_code ?? null,
+        queuesAhead: 0,
+        headlineText: 'ยกเลิกคิวเรียบร้อยแล้ว',
+      },
+    });
+  }
+
+  // ประเมินการแจ้งเตือนลำดับคิวข้างหน้าใหม่ทันทีหลังตัดคิวที่ยกเลิกออก
+  await evaluateQueueNotifications(today);
+
+  return {
+    cancelled: true,
+    queue: (updatedRow as QueueRow | null) ?? targetRow,
+  };
+}
+
+/**
  * ช่างกดปุ่มรันคิว / ไปคิวถัดไป (Next Queue)
  */
 export async function advanceToNextQueue(): Promise<{
