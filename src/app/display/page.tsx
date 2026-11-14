@@ -96,7 +96,7 @@ export default function ShopDisplayPage() {
   const latestWalkInCode = state?.walkInPopup?.displayCode ?? '---';
 
   return (
-    <div className="min-h-[calc(100vh-56px)] bg-slate-950 text-white px-4 py-4 sm:p-8 flex flex-col justify-between">
+    <div className="min-h-screen bg-slate-950 text-white px-4 py-4 sm:p-8 flex flex-col justify-between">
       {/* แถบหัวเรื่องจอหน้าร้าน */}
       <div className="mx-auto w-full max-w-6xl flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
         <div>
