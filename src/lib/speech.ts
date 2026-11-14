@@ -110,3 +110,4 @@ export function announceWalkInAdded(displayCode: string) {
   playChime(960, 90);
   speakThai(`เพิ่มคิวที่ ${num} หน้าร้านโปรดจำ`);
 }
+
