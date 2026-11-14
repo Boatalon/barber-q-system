@@ -20,32 +20,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import type { SystemQueueState } from '@/lib/queue-service';
-
-function playBeep(freq = 880, durationMs = 140) {
-  if (typeof window === 'undefined') return;
-  try {
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext;
-    const ctx = new AudioCtx();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = 'sine';
-    osc.frequency.value = freq;
-    gain.gain.setValueAtTime(0.15, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(
-      0.001,
-      ctx.currentTime + durationMs / 1000
-    );
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.start();
-    osc.stop(ctx.currentTime + durationMs / 1000);
-  } catch {
-    // Ignore audio context restriction
-  }
-}
+import { announceQueueCall, announceWalkInAdded } from '@/lib/speech';
 
 export default function BarberControlPage() {
   const [state, setState] = useState<SystemQueueState | null>(null);
@@ -114,7 +89,9 @@ export default function BarberControlPage() {
       const data = await res.json();
       if (res.ok && data.state) {
         setState(data.state);
-        if (soundEnabled) playBeep(960, 150);
+        if (soundEnabled && data.issuedQueue?.display_code) {
+          announceWalkInAdded(data.issuedQueue.display_code);
+        }
         showToast(
           `ออกคิวหน้าร้าน ${data.issuedQueue.display_code} สำเร็จ (รอรวม ${data.totalWaiting} คิว)`,
           'success'
@@ -138,11 +115,10 @@ export default function BarberControlPage() {
       if (res.ok && data.state) {
         setState(data.state);
         setNextCooldown(3);
-        if (soundEnabled) {
-          playBeep(660, 120);
-          setTimeout(() => playBeep(880, 180), 130);
-        }
         if (data.nowServing) {
+          if (soundEnabled) {
+            announceQueueCall(data.nowServing.display_code);
+          }
           showToast(
             `กำลังเรียกคิว ${data.nowServing.display_code} (${
               data.nowServing.source === 'LINE' ? 'ลูกค้า LINE' : 'ลูกค้าหน้าร้าน'
@@ -164,13 +140,16 @@ export default function BarberControlPage() {
 
   const handleRecall = async () => {
     if (loadingAction || !state?.currentServing) return;
+    const currentCode = state.currentServing.display_code;
     setLoadingAction('recall');
     try {
       const res = await fetch('/api/queue/recall', { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
         if (data.state) setState(data.state);
-        if (soundEnabled) playBeep(780, 200);
+        if (soundEnabled) {
+          announceQueueCall(currentCode);
+        }
         showToast(data.message || 'ส่งสัญญาณเรียกคิวซ้ำแล้ว', 'info');
       } else {
         showToast(data.error || 'ไม่สามารถเรียกคิวซ้ำได้', 'error');
@@ -412,7 +391,7 @@ export default function BarberControlPage() {
                   </span>
                 )
               ) : (
-                <span>กดปุ่มเรียกคิวซ้ำเพื่อส่งเสียงกระดิ่งที่จอหน้าร้าน</span>
+                <span>กดปุ่มเรียกคิวซ้ำเพื่อประกาศเสียงเรียกคิวอีกครั้ง</span>
               )}
             </div>
 

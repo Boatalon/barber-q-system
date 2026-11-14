@@ -11,39 +11,14 @@ import {
   MessageCircle,
 } from 'lucide-react';
 import type { SystemQueueState } from '@/lib/queue-service';
-
-function playAnnouncementChime() {
-  if (typeof window === 'undefined') return;
-  try {
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext;
-    const ctx = new AudioCtx();
-    const notes = [523.25, 659.25, 783.99];
-    notes.forEach((freq, idx) => {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.value = freq;
-      const startTime = ctx.currentTime + idx * 0.14;
-      gain.gain.setValueAtTime(0.18, startTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, startTime + 0.35);
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start(startTime);
-      osc.stop(startTime + 0.35);
-    });
-  } catch {
-    // Ignore audio context restriction
-  }
-}
+import { announceQueueCall, announceWalkInAdded } from '@/lib/speech';
 
 export default function ShopDisplayPage() {
   const [state, setState] = useState<SystemQueueState | null>(null);
   const [soundEnabled, setSoundEnabled] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
+  const isFirstFetchRef = useRef<boolean>(true);
   const prevServingRef = useRef<string | null>(null);
   const prevWalkInCreatedRef = useRef<string | null>(null);
   const prevCallCountRef = useRef<number>(0);
@@ -58,25 +33,26 @@ export default function ShopDisplayPage() {
       const newServingCode = data.currentServing?.display_code ?? null;
       const newCallCount = data.currentServing?.call_count ?? 0;
       const newWalkInCreated = data.walkInPopup?.createdAt ?? null;
+      const newWalkInCode = data.walkInPopup?.displayCode ?? null;
 
-      if (
-        soundEnabled &&
-        newServingCode &&
-        (newServingCode !== prevServingRef.current ||
-          newCallCount > prevCallCountRef.current)
-      ) {
-        playAnnouncementChime();
+      if (!isFirstFetchRef.current && soundEnabled) {
+        if (
+          data.walkInPopup?.active &&
+          newWalkInCreated &&
+          newWalkInCode &&
+          newWalkInCreated !== prevWalkInCreatedRef.current
+        ) {
+          announceWalkInAdded(newWalkInCode);
+        } else if (
+          newServingCode &&
+          (newServingCode !== prevServingRef.current ||
+            newCallCount > prevCallCountRef.current)
+        ) {
+          announceQueueCall(newServingCode);
+        }
       }
 
-      if (
-        soundEnabled &&
-        data.walkInPopup?.active &&
-        newWalkInCreated &&
-        newWalkInCreated !== prevWalkInCreatedRef.current
-      ) {
-        playAnnouncementChime();
-      }
-
+      isFirstFetchRef.current = false;
       prevServingRef.current = newServingCode;
       prevCallCountRef.current = newCallCount;
       prevWalkInCreatedRef.current = newWalkInCreated;
