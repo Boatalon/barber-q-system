@@ -463,9 +463,9 @@ export default function BarberControlPage() {
               <button
                 onClick={() => setShowSkipServingModal(true)}
                 disabled={loadingAction !== null}
-                className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl bg-white border border-slate-300 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-slate-800 shadow-sm hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50"
+                className="flex min-h-[44px] items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs sm:text-sm font-bold text-rose-700 shadow-sm hover:bg-rose-100 active:bg-rose-200 disabled:opacity-50"
               >
-                <XCircle className="h-4 w-4 text-slate-500 shrink-0" />
+                <XCircle className="h-4 w-4 text-rose-600 shrink-0" />
                 <span>ยกเลิกคิว {currentServing.display_code}</span>
               </button>
 
@@ -731,11 +731,11 @@ export default function BarberControlPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-2.5 pt-1">
-              {/* ปุ่มยืนยันสีแดงอยู่ด้านซ้ายตามที่กำหนด */}
+              {/* ปุ่มยืนยันยกเลิกเป็นสีปกติอยู่ด้านซ้าย ส่วนไม่ยกเลิกเป็นสีเขียวอยู่ด้านขวา */}
               <button
                 onClick={handleSkipServingQueue}
                 disabled={loadingAction !== null}
-                className="flex min-h-[44px] items-center justify-center rounded-xl bg-rose-600 px-4 py-2.5 text-xs sm:text-sm font-bold text-white shadow-sm hover:bg-rose-700 active:bg-rose-800 disabled:opacity-50"
+                className="flex min-h-[44px] items-center justify-center rounded-xl border border-slate-300 bg-white px-4 py-2.5 text-xs sm:text-sm font-bold text-slate-700 shadow-sm hover:bg-slate-50 active:bg-slate-100 disabled:opacity-50"
               >
                 {loadingAction === 'cancel'
                   ? 'กำลังยกเลิก...'
