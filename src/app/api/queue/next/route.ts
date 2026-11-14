@@ -1,9 +1,12 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import { advanceToNextQueue, getSystemQueueState } from '@/lib/queue-service';
 
 export async function POST() {
   try {
     const result = await advanceToNextQueue();
+    if (result.notifyPromise) {
+      after(result.notifyPromise);
+    }
     const state = await getSystemQueueState();
     return NextResponse.json({
       success: true,

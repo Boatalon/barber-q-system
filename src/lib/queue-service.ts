@@ -165,18 +165,53 @@ export async function getActiveQueuesWithPosition(
 /**
  * ตรวจสอบและส่งแจ้งเตือนอัตโนมัติเมื่อจำนวนคิวข้างหน้าตรงตามเกณฑ์ (เช่น เหลือ 3 คิว หรือ 1 คิว)
  */
+/**
+ * ล้างข้อมูลคิวและประวัติแจ้งเตือนที่เก่าเกิน 3 วันออกจากฐานข้อมูลอัตโนมัติ
+ */
+let lastAutoCleanupCheckDate: string | null = null;
+
+export async function cleanupOldQueueData(): Promise<{
+  cutoffIso: string;
+}> {
+  const supabase = getSupabase();
+  const cutoffIso = new Date(
+    Date.now() - 3 * 24 * 60 * 60 * 1000
+  ).toISOString();
+
+  await Promise.all([
+    supabase.from('notification_logs').delete().lt('created_at', cutoffIso),
+    supabase.from('queues').delete().lt('created_at', cutoffIso),
+  ]);
+
+  return { cutoffIso };
+}
+
+/**
+ * ตรวจสอบและส่งแจ้งเตือนอัตโนมัติเมื่อจำนวนคิวข้างหน้าตรงตามเกณฑ์ (เช่น เหลือ 3 คิว, 2 คิว, 1 คิว)
+ */
 export async function evaluateQueueNotifications(
-  today = getTodayDateString()
+  today = getTodayDateString(),
+  preloaded?: {
+    settings: ShopSettings;
+    serving: EnrichedQueueItem | null;
+    waiting: EnrichedQueueItem[];
+  }
 ): Promise<NotificationLogRow[]> {
   const supabase = getSupabase();
-  const [settings, { serving, waiting }] = await Promise.all([
-    getSettings(),
-    getActiveQueuesWithPosition(today),
-  ]);
+  const [settings, { serving, waiting }] = preloaded
+    ? [
+        preloaded.settings,
+        { serving: preloaded.serving, waiting: preloaded.waiting },
+      ]
+    : await Promise.all([getSettings(), getActiveQueuesWithPosition(today)]);
 
   const currentServingCode = serving?.display_code ?? null;
   const lineWaiting = waiting.filter(
-    (item) => item.source === 'LINE' && Boolean(item.line_user_id)
+    (item) =>
+      item.source === 'LINE' &&
+      Boolean(item.line_user_id) &&
+      item.queuesAhead >= 1 &&
+      item.queuesAhead <= settings.notify_ahead_first
   );
   if (lineWaiting.length === 0) {
     return [];
@@ -196,84 +231,80 @@ export async function evaluateQueueNotifications(
       message: string;
     }> | null) ?? [];
 
-  const sentLogs: NotificationLogRow[] = [];
+  const tasks: Promise<NotificationLogRow | null>[] = lineWaiting.map(
+    async (item) => {
+      if (!item.line_user_id) return null;
 
-  for (const item of lineWaiting) {
-    if (!item.line_user_id) continue;
-    if (item.queuesAhead < 1 || item.queuesAhead > settings.notify_ahead_first) {
-      continue;
-    }
+      const aheadToken1 = `เหลืออีกเพียง ${item.queuesAhead} คิว`;
+      const aheadToken2 = `เหลืออีก ${item.queuesAhead} คิว`;
+      const alreadySentForThisCount = existingLogs.some(
+        (log) =>
+          log.queue_id === item.id &&
+          (log.message.includes(aheadToken1) ||
+            log.message.includes(aheadToken2))
+      );
 
-    const aheadToken1 = `เหลืออีกเพียง ${item.queuesAhead} คิว`;
-    const aheadToken2 = `เหลืออีก ${item.queuesAhead} คิว`;
-    const alreadySentForThisCount = existingLogs.some(
-      (log) =>
-        log.queue_id === item.id &&
-        (log.message.includes(aheadToken1) || log.message.includes(aheadToken2))
-    );
+      if (alreadySentForThisCount) {
+        return null;
+      }
 
-    if (alreadySentForThisCount) {
-      continue;
-    }
-
-    // เช็คระยะใกล้ถึงคิว (เช่น เหลือ <= notify_ahead_second หรือ เหลือ 1 คิวสุดท้าย)
-    if (
-      item.queuesAhead <= settings.notify_ahead_second ||
-      item.queuesAhead === 1
-    ) {
-      await supabase
-        .from('queues')
-        .update({ notified_near_2: true, notified_near_1: true })
-        .eq('id', item.id);
-
-      const msg = `⏳ เตรียมตัวได้เลยครับ! คิว ${item.display_code} ของคุณเหลืออีกเพียง ${item.queuesAhead} คิวก่อนถึงลำดับ (คิวที่กำลังตัดปัจจุบัน: ${currentServingCode ?? '-'})`;
-      const log = await sendLineNotification({
-        queueId: item.id,
-        displayCode: item.display_code,
-        lineUserId: item.line_user_id,
-        triggerType: 'NEAR_2',
-        message: msg,
-        flexPayload: {
-          shopName: settings.shop_name,
-          myQueueCode: item.display_code,
-          myStatus: 'WAITING',
-          currentServingCode,
-          queuesAhead: item.queuesAhead,
-          headlineText: `เหลืออีก ${item.queuesAhead} คิวจะถึงลำดับของคุณ!`,
-        },
-      });
-      sentLogs.push(log);
-      continue;
-    }
-
-    // เช็คระยะแจ้งเตือนล่วงหน้า (เช่น เหลือ <= notify_ahead_first คิว)
-    if (item.queuesAhead <= settings.notify_ahead_first) {
-      await supabase
-        .from('queues')
-        .update({ notified_near_1: true })
-        .eq('id', item.id);
+      if (
+        item.queuesAhead <= settings.notify_ahead_second ||
+        item.queuesAhead === 1
+      ) {
+        const msg = `⏳ เตรียมตัวได้เลยครับ! คิว ${item.display_code} ของคุณเหลืออีกเพียง ${item.queuesAhead} คิวก่อนถึงลำดับ (คิวที่กำลังตัดปัจจุบัน: ${currentServingCode ?? '-'})`;
+        const [, log] = await Promise.all([
+          supabase
+            .from('queues')
+            .update({ notified_near_2: true, notified_near_1: true })
+            .eq('id', item.id),
+          sendLineNotification({
+            queueId: item.id,
+            displayCode: item.display_code,
+            lineUserId: item.line_user_id,
+            triggerType: 'NEAR_2',
+            message: msg,
+            flexPayload: {
+              shopName: settings.shop_name,
+              myQueueCode: item.display_code,
+              myStatus: 'WAITING',
+              currentServingCode,
+              queuesAhead: item.queuesAhead,
+              headlineText: `เหลืออีก ${item.queuesAhead} คิวจะถึงลำดับของคุณ!`,
+            },
+          }),
+        ]);
+        return log;
+      }
 
       const msg = `🔔 แจ้งเตือนคิว ${item.display_code}: ขณะนี้เหลืออีก ${item.queuesAhead} คิวก่อนถึงลำดับของคุณ (คิวที่กำลังตัดปัจจุบัน: ${currentServingCode ?? '-'})`;
-      const log = await sendLineNotification({
-        queueId: item.id,
-        displayCode: item.display_code,
-        lineUserId: item.line_user_id,
-        triggerType: 'NEAR_1',
-        message: msg,
-        flexPayload: {
-          shopName: settings.shop_name,
-          myQueueCode: item.display_code,
-          myStatus: 'WAITING',
-          currentServingCode,
-          queuesAhead: item.queuesAhead,
-          headlineText: `เหลืออีก ${item.queuesAhead} คิวก่อนถึงลำดับของคุณ`,
-        },
-      });
-      sentLogs.push(log);
+      const [, log] = await Promise.all([
+        supabase
+          .from('queues')
+          .update({ notified_near_1: true })
+          .eq('id', item.id),
+        sendLineNotification({
+          queueId: item.id,
+          displayCode: item.display_code,
+          lineUserId: item.line_user_id,
+          triggerType: 'NEAR_1',
+          message: msg,
+          flexPayload: {
+            shopName: settings.shop_name,
+            myQueueCode: item.display_code,
+            myStatus: 'WAITING',
+            currentServingCode,
+            queuesAhead: item.queuesAhead,
+            headlineText: `เหลืออีก ${item.queuesAhead} คิวก่อนถึงลำดับของคุณ`,
+          },
+        }),
+      ]);
+      return log;
     }
-  }
+  );
 
-  return sentLogs;
+  const results = await Promise.all(tasks);
+  return results.filter((log): log is NotificationLogRow => log !== null);
 }
 
 /**
@@ -357,27 +388,28 @@ export async function addWalkInQueue(): Promise<{
   const displayCode = formatQueueCode(nextNum);
   const nowIso = new Date().toISOString();
 
-  const { data: inserted } = await supabase
-    .from('queues')
-    .insert({
-      queue_date: today,
-      queue_number: nextNum,
-      display_code: displayCode,
-      source: 'WALK_IN',
-      status: 'WAITING',
-      created_at: nowIso,
-    })
-    .select('*')
-    .single();
-
-  await supabase
-    .from('shop_settings')
-    .update({
-      last_walkin_display_code: displayCode,
-      last_walkin_created_at: nowIso,
-      updated_at: nowIso,
-    })
-    .eq('id', 1);
+  const [{ data: inserted }] = await Promise.all([
+    supabase
+      .from('queues')
+      .insert({
+        queue_date: today,
+        queue_number: nextNum,
+        display_code: displayCode,
+        source: 'WALK_IN',
+        status: 'WAITING',
+        created_at: nowIso,
+      })
+      .select('*')
+      .single(),
+    supabase
+      .from('shop_settings')
+      .update({
+        last_walkin_display_code: displayCode,
+        last_walkin_created_at: nowIso,
+        updated_at: nowIso,
+      })
+      .eq('id', 1),
+  ]);
 
   const { waiting } = await getActiveQueuesWithPosition(today);
   const createdItem =
@@ -588,55 +620,45 @@ export async function cancelQueueById(
   cancelled: boolean;
   queue: QueueRow | null;
   nowServing: EnrichedQueueItem | null;
+  notifyPromise?: Promise<unknown>;
   reason?: string;
 }> {
   const supabase = getSupabase();
   const today = getTodayDateString();
-  const settings = await getSettings();
+  const [settings, { serving: prevServing, waiting: prevWaiting }] =
+    await Promise.all([getSettings(), getActiveQueuesWithPosition(today)]);
 
-  const { data: target } = await supabase
-    .from('queues')
-    .select('*')
-    .eq('id', queueId)
-    .in('status', ['WAITING', 'SERVING'])
-    .maybeSingle();
+  const targetRow =
+    (prevServing?.id === queueId ? prevServing : null) ||
+    prevWaiting.find((q) => q.id === queueId) ||
+    null;
 
-  if (!target) {
+  if (!targetRow) {
     return {
       cancelled: false,
       queue: null,
-      nowServing: null,
+      nowServing: prevServing,
       reason: 'ไม่พบคิวที่ต้องการยกเลิก หรือคิวนี้ถูกปิดไปแล้ว',
     };
   }
 
-  const targetRow = target as QueueRow;
   const wasServing = targetRow.status === 'SERVING';
   const isNoShow = options?.noShow ?? wasServing;
   const nowIso = new Date().toISOString();
+  const nextServingCandidate = wasServing ? prevWaiting[0] ?? null : null;
 
-  const { data: updatedRow } = await supabase
-    .from('queues')
-    .update({ status: 'CANCELLED', closed_at: nowIso })
-    .eq('id', targetRow.id)
-    .select('*')
-    .single();
-
-  // หากยกเลิกคิวที่กำลังให้บริการอยู่ (SERVING) ให้เรียกคิวถัดไปที่รออยู่ขึ้นมาเป็น SERVING ทันที
-  let nextServingRow: QueueRow | null = null;
-  if (wasServing) {
-    const { data: nextWaiting } = await supabase
+  const updatePromises: PromiseLike<unknown>[] = [
+    supabase
       .from('queues')
+      .update({ status: 'CANCELLED', closed_at: nowIso })
+      .eq('id', targetRow.id)
       .select('*')
-      .eq('queue_date', today)
-      .eq('status', 'WAITING')
-      .order('queue_number', { ascending: true })
-      .limit(1)
-      .maybeSingle();
+      .single(),
+  ];
 
-    if (nextWaiting) {
-      nextServingRow = nextWaiting as QueueRow;
-      await supabase
+  if (nextServingCandidate) {
+    updatePromises.push(
+      supabase
         .from('queues')
         .update({
           status: 'SERVING',
@@ -644,70 +666,74 @@ export async function cancelQueueById(
           call_count: 1,
           last_called_at: nowIso,
         })
-        .eq('id', nextServingRow.id);
-    }
+        .eq('id', nextServingCandidate.id)
+    );
   }
 
-  const { serving } = await getActiveQueuesWithPosition(today);
+  const [cancelledRes] = await Promise.all(updatePromises);
+  const updatedRow =
+    (cancelledRes as { data?: QueueRow | null } | null)?.data ?? {
+      ...targetRow,
+      status: 'CANCELLED' as const,
+      closed_at: nowIso,
+    };
 
-  if (targetRow.source === 'LINE' && targetRow.line_user_id) {
-    const message = isNoShow
-      ? `✖ คิวหมายเลข ${targetRow.display_code} ของคุณถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการครับ`
-      : `✖ คิวหมายเลข ${targetRow.display_code} ถูกยกเลิกแล้วครับ`;
+  const updatedPositions = await getActiveQueuesWithPosition(today);
+  const { serving, waiting } = updatedPositions;
 
-    await sendLineNotification({
-      queueId: targetRow.id,
-      displayCode: targetRow.display_code,
-      lineUserId: targetRow.line_user_id,
-      triggerType: 'CANCELLED',
-      message,
-      flexPayload: {
-        shopName: settings.shop_name,
-        myQueueCode: targetRow.display_code,
-        myStatus: 'CANCELLED',
-        currentServingCode: serving?.display_code ?? null,
-        queuesAhead: 0,
-        headlineText: isNoShow
-          ? 'ถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการ'
-          : 'ยกเลิกคิวเรียบร้อยแล้ว',
-        statusTextOverride: isNoShow
-          ? 'ถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการ'
-          : 'ยกเลิกคิวแล้ว',
-      },
-    });
-  }
-
-  // แจ้งเตือนคิวใหม่ที่ถูกเลื่อนขึ้นมาเป็น SERVING ทันที (ถ้าเป็นลูกค้า LINE)
-  if (
-    nextServingRow &&
-    nextServingRow.source === 'LINE' &&
-    nextServingRow.line_user_id
-  ) {
-    const callMsg = `🎉 ถึงคิวหมายเลข ${nextServingRow.display_code} ของคุณแล้วครับ! เชิญเข้ารับบริการที่ร้านได้เลยครับ (เรียกครั้งที่ 1/${settings.repeat_call_max_count})`;
-    await sendLineNotification({
-      queueId: nextServingRow.id,
-      displayCode: nextServingRow.display_code,
-      lineUserId: nextServingRow.line_user_id,
-      triggerType: 'CALLED',
-      message: callMsg,
-      flexPayload: {
-        shopName: settings.shop_name,
-        myQueueCode: nextServingRow.display_code,
-        myStatus: 'SERVING',
-        currentServingCode: nextServingRow.display_code,
-        queuesAhead: 0,
-        headlineText: '🎉 ถึงคิวของคุณแล้ว! เชิญที่ร้านได้เลยครับ',
-      },
-    });
-  }
-
-  // ประเมินการแจ้งเตือนลำดับคิวข้างหน้าใหม่ทันทีสำหรับทุกคิวที่กำลังรอ
-  await evaluateQueueNotifications(today);
+  // แยกงานส่งข้อความ LINE ให้ทำแบบขนานโดยไม่บล็อกการตอบสนองปุ่มกดของช่าง
+  const notifyPromise = Promise.allSettled([
+    targetRow.source === 'LINE' && targetRow.line_user_id
+      ? sendLineNotification({
+          queueId: targetRow.id,
+          displayCode: targetRow.display_code,
+          lineUserId: targetRow.line_user_id,
+          triggerType: 'CANCELLED',
+          message: isNoShow
+            ? `✖ คิวหมายเลข ${targetRow.display_code} ของคุณถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการครับ`
+            : `✖ คิวหมายเลข ${targetRow.display_code} ถูกยกเลิกแล้วครับ`,
+          flexPayload: {
+            shopName: settings.shop_name,
+            myQueueCode: targetRow.display_code,
+            myStatus: 'CANCELLED',
+            currentServingCode: serving?.display_code ?? null,
+            queuesAhead: 0,
+            headlineText: isNoShow
+              ? 'ถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการ'
+              : 'ยกเลิกคิวเรียบร้อยแล้ว',
+            statusTextOverride: isNoShow
+              ? 'ถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการ'
+              : 'ยกเลิกคิวแล้ว',
+          },
+        })
+      : Promise.resolve(),
+    nextServingCandidate &&
+    nextServingCandidate.source === 'LINE' &&
+    nextServingCandidate.line_user_id
+      ? sendLineNotification({
+          queueId: nextServingCandidate.id,
+          displayCode: nextServingCandidate.display_code,
+          lineUserId: nextServingCandidate.line_user_id,
+          triggerType: 'CALLED',
+          message: `🎉 ถึงคิวหมายเลข ${nextServingCandidate.display_code} ของคุณแล้วครับ! เชิญเข้ารับบริการที่ร้านได้เลยครับ (เรียกครั้งที่ 1/${settings.repeat_call_max_count})`,
+          flexPayload: {
+            shopName: settings.shop_name,
+            myQueueCode: nextServingCandidate.display_code,
+            myStatus: 'SERVING',
+            currentServingCode: nextServingCandidate.display_code,
+            queuesAhead: 0,
+            headlineText: '🎉 ถึงคิวของคุณแล้ว! เชิญที่ร้านได้เลยครับ',
+          },
+        })
+      : Promise.resolve(),
+    evaluateQueueNotifications(today, { settings, serving, waiting }),
+  ]);
 
   return {
     cancelled: true,
-    queue: (updatedRow as QueueRow | null) ?? targetRow,
+    queue: updatedRow,
     nowServing: serving,
+    notifyPromise,
   };
 }
 
@@ -718,80 +744,72 @@ export async function advanceToNextQueue(): Promise<{
   closedQueue: QueueRow | null;
   nowServing: EnrichedQueueItem | null;
   notificationsSent: NotificationLogRow[];
+  notifyPromise?: Promise<unknown>;
 }> {
   const supabase = getSupabase();
   const today = getTodayDateString();
-  const settings = await getSettings();
+  const [settings, { serving: currentServing, waiting: prevWaiting }] =
+    await Promise.all([getSettings(), getActiveQueuesWithPosition(today)]);
   const nowIso = new Date().toISOString();
 
-  const { data: currentServing } = await supabase
-    .from('queues')
-    .select('*')
-    .eq('queue_date', today)
-    .eq('status', 'SERVING')
-    .order('queue_number', { ascending: true })
-    .limit(1)
-    .maybeSingle();
+  const nextWaiting = prevWaiting[0] ?? null;
+  const dbOps: PromiseLike<unknown>[] = [];
 
   if (currentServing) {
-    await supabase
-      .from('queues')
-      .update({ status: 'COMPLETED', closed_at: nowIso })
-      .eq('id', (currentServing as QueueRow).id);
+    dbOps.push(
+      supabase
+        .from('queues')
+        .update({ status: 'COMPLETED', closed_at: nowIso })
+        .eq('id', currentServing.id)
+    );
   }
-
-  const { data: nextWaiting } = await supabase
-    .from('queues')
-    .select('*')
-    .eq('queue_date', today)
-    .eq('status', 'WAITING')
-    .order('queue_number', { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  const notificationsSent: NotificationLogRow[] = [];
 
   if (nextWaiting) {
-    const nextRow = nextWaiting as QueueRow;
-    await supabase
-      .from('queues')
-      .update({
-        status: 'SERVING',
-        served_at: nowIso,
-        call_count: 1,
-        last_called_at: nowIso,
-      })
-      .eq('id', nextRow.id);
-
-    if (nextRow.source === 'LINE' && nextRow.line_user_id) {
-      const callMsg = `🎉 ถึงคิวหมายเลข ${nextRow.display_code} ของคุณแล้วครับ! เชิญเข้ารับบริการที่ร้านได้เลยครับ (เรียกครั้งที่ 1/${settings.repeat_call_max_count})`;
-      const callLog = await sendLineNotification({
-        queueId: nextRow.id,
-        displayCode: nextRow.display_code,
-        lineUserId: nextRow.line_user_id,
-        triggerType: 'CALLED',
-        message: callMsg,
-        flexPayload: {
-          shopName: settings.shop_name,
-          myQueueCode: nextRow.display_code,
-          myStatus: 'SERVING',
-          currentServingCode: nextRow.display_code,
-          queuesAhead: 0,
-          headlineText: '🎉 ถึงคิวของคุณแล้ว! เชิญที่ร้านได้เลยครับ',
-        },
-      });
-      notificationsSent.push(callLog);
-    }
+    dbOps.push(
+      supabase
+        .from('queues')
+        .update({
+          status: 'SERVING',
+          served_at: nowIso,
+          call_count: 1,
+          last_called_at: nowIso,
+        })
+        .eq('id', nextWaiting.id)
+    );
   }
 
-  const nearLogs = await evaluateQueueNotifications(today);
-  notificationsSent.push(...nearLogs);
+  if (dbOps.length > 0) {
+    await Promise.all(dbOps);
+  }
 
-  const { serving } = await getActiveQueuesWithPosition(today);
+  const { serving, waiting } = await getActiveQueuesWithPosition(today);
+
+  const notifyPromise = Promise.allSettled([
+    nextWaiting && nextWaiting.source === 'LINE' && nextWaiting.line_user_id
+      ? sendLineNotification({
+          queueId: nextWaiting.id,
+          displayCode: nextWaiting.display_code,
+          lineUserId: nextWaiting.line_user_id,
+          triggerType: 'CALLED',
+          message: `🎉 ถึงคิวหมายเลข ${nextWaiting.display_code} ของคุณแล้วครับ! เชิญเข้ารับบริการที่ร้านได้เลยครับ (เรียกครั้งที่ 1/${settings.repeat_call_max_count})`,
+          flexPayload: {
+            shopName: settings.shop_name,
+            myQueueCode: nextWaiting.display_code,
+            myStatus: 'SERVING',
+            currentServingCode: nextWaiting.display_code,
+            queuesAhead: 0,
+            headlineText: '🎉 ถึงคิวของคุณแล้ว! เชิญที่ร้านได้เลยครับ',
+          },
+        })
+      : Promise.resolve(),
+    evaluateQueueNotifications(today, { settings, serving, waiting }),
+  ]);
+
   return {
-    closedQueue: (currentServing as QueueRow | null) ?? null,
+    closedQueue: currentServing ?? null,
     nowServing: serving,
-    notificationsSent,
+    notificationsSent: [],
+    notifyPromise,
   };
 }
 
@@ -801,7 +819,7 @@ export async function advanceToNextQueue(): Promise<{
 export async function manualRecallCurrentQueue(): Promise<{
   success: boolean;
   message: string;
-  log?: NotificationLogRow;
+  notifyPromise?: Promise<unknown>;
 }> {
   const supabase = getSupabase();
   const today = getTodayDateString();
@@ -827,7 +845,7 @@ export async function manualRecallCurrentQueue(): Promise<{
 
   if (serving.source === 'LINE' && serving.line_user_id) {
     const msg = `📢 เรียกคิวซ้ำ (ครั้งที่ ${nextCallCount}): ถึงคิวหมายเลข ${serving.display_code} แล้วครับ กรุณาเข้ารับบริการที่ร้าน`;
-    const log = await sendLineNotification({
+    const notifyPromise = sendLineNotification({
       queueId: serving.id,
       displayCode: serving.display_code,
       lineUserId: serving.line_user_id,
@@ -846,7 +864,7 @@ export async function manualRecallCurrentQueue(): Promise<{
     return {
       success: true,
       message: `ส่ง LINE เรียกคิว ${serving.display_code} ซ้ำเรียบร้อยแล้ว (ครั้งที่ ${nextCallCount})`,
-      log,
+      notifyPromise,
     };
   }
 
@@ -876,13 +894,17 @@ export async function resetTodayQueues(): Promise<void> {
 }
 
 /**
- * ดึงสถานะทั้งหมดของระบบคิวกลาง
+ * ดึงสถานะทั้งหมดของระบบคิวกลาง (รวม Query ทั้งหมดในรอบเดียวเพื่อความเร็วสูงสุด)
  */
 export async function getSystemQueueState(): Promise<SystemQueueState> {
-  await processDueRepeatCalls();
-
   const supabase = getSupabase();
   const today = getTodayDateString();
+
+  // ตรวจสอบและล้างข้อมูลคิวที่เก่าเกิน 3 วันอัตโนมัติในเบื้องหลัง (วันละ 1 ครั้ง)
+  if (lastAutoCleanupCheckDate !== today) {
+    lastAutoCleanupCheckDate = today;
+    void cleanupOldQueueData().catch(() => {});
+  }
 
   const [
     settings,
@@ -913,6 +935,48 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
       .order('id', { ascending: false })
       .limit(25),
   ]);
+
+  // ตรวจสอบการส่งแจ้งเตือนซ้ำอัตโนมัติใน LINE โดยไม่ต้องดึง DB ซ้ำอีกรอบ
+  if (
+    serving &&
+    serving.source === 'LINE' &&
+    serving.line_user_id &&
+    serving.call_count < settings.repeat_call_max_count
+  ) {
+    const lastCalledMs = serving.last_called_at
+      ? new Date(serving.last_called_at).getTime()
+      : new Date(serving.served_at || serving.created_at).getTime();
+    const elapsedSec = (Date.now() - lastCalledMs) / 1000;
+
+    if (elapsedSec >= settings.repeat_call_interval_sec) {
+      const nextCallCount = serving.call_count + 1;
+      const nowIso = new Date().toISOString();
+      serving.call_count = nextCallCount;
+      serving.last_called_at = nowIso;
+
+      void Promise.allSettled([
+        supabase
+          .from('queues')
+          .update({ call_count: nextCallCount, last_called_at: nowIso })
+          .eq('id', serving.id),
+        sendLineNotification({
+          queueId: serving.id,
+          displayCode: serving.display_code,
+          lineUserId: serving.line_user_id,
+          triggerType: 'RECALL',
+          message: `📢 เรียกคิวซ้ำ (${nextCallCount}/${settings.repeat_call_max_count}): ถึงคิวหมายเลข ${serving.display_code} แล้วครับ กรุณาเข้ารับบริการที่ร้าน`,
+          flexPayload: {
+            shopName: settings.shop_name,
+            myQueueCode: serving.display_code,
+            myStatus: 'SERVING',
+            currentServingCode: serving.display_code,
+            queuesAhead: 0,
+            headlineText: `เรียกคิวครั้งที่ ${nextCallCount}/${settings.repeat_call_max_count} - เชิญที่ร้านได้เลยครับ`,
+          },
+        }),
+      ]);
+    }
+  }
 
   const recentHistory = (recentHistoryData as QueueRow[]) ?? [];
   const recentNotifications =

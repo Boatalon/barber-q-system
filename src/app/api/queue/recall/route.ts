@@ -1,4 +1,4 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, after } from 'next/server';
 import {
   getSystemQueueState,
   manualRecallCurrentQueue,
@@ -7,6 +7,9 @@ import {
 export async function POST() {
   try {
     const result = await manualRecallCurrentQueue();
+    if (result.notifyPromise) {
+      after(result.notifyPromise);
+    }
     const state = await getSystemQueueState();
     return NextResponse.json({
       ...result,

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { cancelQueueById, getSystemQueueState } from '@/lib/queue-service';
 
 export async function POST(req: NextRequest) {
@@ -15,6 +15,9 @@ export async function POST(req: NextRequest) {
     const result = await cancelQueueById(queueId, {
       noShow: Boolean(body.noShow),
     });
+    if (result.notifyPromise) {
+      after(result.notifyPromise);
+    }
     const state = await getSystemQueueState();
 
     if (!result.cancelled) {

@@ -19,7 +19,7 @@ import {
   AlertCircle,
   Trash2,
 } from 'lucide-react';
-import type { SystemQueueState } from '@/lib/queue-service';
+import type { EnrichedQueueItem, SystemQueueState } from '@/lib/queue-service';
 import {
   announceQueueCall,
   announceQueueSkipped,
@@ -41,6 +41,7 @@ export default function BarberControlPage() {
     type: 'success' | 'info' | 'warning' | 'error';
   } | null>(null);
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const isMutatingRef = useRef(false);
 
   const showToast = useCallback(
     (
@@ -57,11 +58,14 @@ export default function BarberControlPage() {
   );
 
   const fetchState = useCallback(async () => {
+    if (isMutatingRef.current) return;
     try {
       const res = await fetch('/api/queue/state', { cache: 'no-store' });
       if (res.ok) {
         const data: SystemQueueState = await res.json();
-        setState(data);
+        if (!isMutatingRef.current) {
+          setState(data);
+        }
         setConnectionError(false);
       } else {
         setConnectionError(true);
@@ -88,13 +92,67 @@ export default function BarberControlPage() {
 
   const handleAddWalkIn = async () => {
     if (loadingAction) return;
+    const previousState = state;
+    const predictedNum = (Number(state?.lastIssuedCode || 0) || 0) + 1;
+    const predictedCode = String(predictedNum).padStart(3, '0');
+
     setLoadingAction('walkin');
+    isMutatingRef.current = true;
+
+    if (soundEnabled) {
+      announceWalkInAdded(predictedCode);
+    }
+
+    if (state) {
+      const nowIso = new Date().toISOString();
+      const optimisticQueue: EnrichedQueueItem = {
+        id: -Date.now(),
+        queue_date: state.todayDate,
+        queue_number: predictedNum,
+        display_code: predictedCode,
+        source: 'WALK_IN',
+        line_user_id: null,
+        customer_label: `ลูกค้าหน้าร้าน #${predictedCode}`,
+        status: 'WAITING',
+        notified_near_1: false,
+        notified_near_2: false,
+        call_count: 0,
+        last_called_at: null,
+        created_at: nowIso,
+        served_at: null,
+        closed_at: null,
+        queuesAhead: state.waitingQueues.length + (state.currentServing ? 1 : 0),
+        notifiedNear1: false,
+        notifiedNear2: false,
+      };
+      const nextWaiting = [...state.waitingQueues, optimisticQueue];
+      setState({
+        ...state,
+        lastIssuedCode: predictedCode,
+        totalWaiting: nextWaiting.length,
+        waitingQueues: nextWaiting,
+        walkInWaitingQueues: [...state.walkInWaitingQueues, optimisticQueue],
+        walkInPopup: {
+          active: true,
+          displayCode: predictedCode,
+          waitingCount: nextWaiting.length,
+          createdAt: nowIso,
+          expiresAtMs:
+            Date.now() + state.settings.walkin_popup_duration_sec * 1000,
+        },
+      });
+    }
+
     try {
       const res = await fetch('/api/queue/walk-in', { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.state) {
         setState(data.state);
-        if (soundEnabled && data.issuedQueue?.display_code) {
+        if (
+          soundEnabled &&
+          data.issuedQueue?.display_code &&
+          data.issuedQueue.display_code !== predictedCode
+        ) {
           announceWalkInAdded(data.issuedQueue.display_code);
         }
         showToast(
@@ -102,26 +160,60 @@ export default function BarberControlPage() {
           'success'
         );
       } else {
+        if (previousState) setState(previousState);
         showToast(data.error || 'ไม่สามารถเพิ่มคิวหน้าร้านได้', 'error');
       }
     } catch {
+      if (previousState) setState(previousState);
       showToast('การเชื่อมต่อขัดข้อง ไม่สามารถเพิ่มคิวได้', 'error');
     } finally {
+      isMutatingRef.current = false;
       setLoadingAction(null);
     }
   };
 
   const handleNextQueue = async () => {
     if (loadingAction || nextCooldown > 0) return;
+    const previousState = state;
+    const nextInLine = state?.waitingQueues[0] ?? null;
+
     setLoadingAction('next');
+    isMutatingRef.current = true;
+    setNextCooldown(3);
+
+    if (nextInLine && soundEnabled) {
+      announceQueueCall(nextInLine.display_code);
+    }
+
+    if (state) {
+      const remainingWaiting = state.waitingQueues.slice(1).map((q, idx) => ({
+        ...q,
+        queuesAhead: idx + 1,
+      }));
+      setState({
+        ...state,
+        currentServing: nextInLine
+          ? { ...nextInLine, status: 'SERVING', queuesAhead: 0 }
+          : null,
+        totalWaiting: remainingWaiting.length,
+        waitingQueues: remainingWaiting,
+        walkInWaitingQueues: remainingWaiting.filter(
+          (q) => q.source === 'WALK_IN'
+        ),
+        lineWaitingQueues: remainingWaiting.filter((q) => q.source === 'LINE'),
+      });
+    }
+
     try {
       const res = await fetch('/api/queue/next', { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.state) {
         setState(data.state);
-        setNextCooldown(3);
         if (data.nowServing) {
-          if (soundEnabled) {
+          if (
+            soundEnabled &&
+            data.nowServing.display_code !== nextInLine?.display_code
+          ) {
             announceQueueCall(data.nowServing.display_code);
           }
           showToast(
@@ -134,11 +226,14 @@ export default function BarberControlPage() {
           showToast('ปิดคิวแล้ว ขณะนี้ไม่มีคิวรอในระบบ', 'warning');
         }
       } else {
+        if (previousState) setState(previousState);
         showToast(data.error || 'ไม่สามารถเลื่อนคิวได้', 'error');
       }
     } catch {
+      if (previousState) setState(previousState);
       showToast('การเชื่อมต่อขัดข้อง ไม่สามารถเลื่อนคิวได้', 'error');
     } finally {
+      isMutatingRef.current = false;
       setLoadingAction(null);
     }
   };
@@ -147,14 +242,17 @@ export default function BarberControlPage() {
     if (loadingAction || !state?.currentServing) return;
     const currentCode = state.currentServing.display_code;
     setLoadingAction('recall');
+    isMutatingRef.current = true;
+
+    if (soundEnabled) {
+      announceQueueCall(currentCode);
+    }
+
     try {
       const res = await fetch('/api/queue/recall', { method: 'POST' });
       const data = await res.json();
       if (res.ok) {
         if (data.state) setState(data.state);
-        if (soundEnabled) {
-          announceQueueCall(currentCode);
-        }
         showToast(data.message || 'ส่งสัญญาณเรียกคิวซ้ำแล้ว', 'info');
       } else {
         showToast(data.error || 'ไม่สามารถเรียกคิวซ้ำได้', 'error');
@@ -162,15 +260,43 @@ export default function BarberControlPage() {
     } catch {
       showToast('การเชื่อมต่อขัดข้อง ไม่สามารถเรียกคิวซ้ำได้', 'error');
     } finally {
+      isMutatingRef.current = false;
       setLoadingAction(null);
     }
   };
 
   const handleSkipServingQueue = async () => {
     if (loadingAction || !state?.currentServing) return;
+    const previousState = state;
     const targetId = state.currentServing.id;
     const skippedCode = state.currentServing.display_code;
+    const nextInLine = state.waitingQueues[0] ?? null;
+
     setLoadingAction('cancel');
+    isMutatingRef.current = true;
+    setShowSkipServingModal(false);
+
+    if (soundEnabled) {
+      announceQueueSkipped(skippedCode, nextInLine?.display_code ?? null);
+    }
+
+    const remainingWaiting = state.waitingQueues.slice(1).map((q, idx) => ({
+      ...q,
+      queuesAhead: idx + 1,
+    }));
+    setState({
+      ...state,
+      currentServing: nextInLine
+        ? { ...nextInLine, status: 'SERVING', queuesAhead: 0 }
+        : null,
+      totalWaiting: remainingWaiting.length,
+      waitingQueues: remainingWaiting,
+      walkInWaitingQueues: remainingWaiting.filter(
+        (q) => q.source === 'WALK_IN'
+      ),
+      lineWaitingQueues: remainingWaiting.filter((q) => q.source === 'LINE'),
+    });
+
     try {
       const res = await fetch('/api/queue/cancel', {
         method: 'POST',
@@ -180,11 +306,7 @@ export default function BarberControlPage() {
       const data = await res.json();
       if (res.ok && data.state) {
         setState(data.state);
-        setShowSkipServingModal(false);
         const nextCode: string | null = data.nowServing?.display_code ?? null;
-        if (soundEnabled) {
-          announceQueueSkipped(skippedCode, nextCode);
-        }
         showToast(
           nextCode
             ? `ข้ามคิว ${skippedCode} และเรียกคิวถัดไป ${nextCode} ทันที`
@@ -192,18 +314,47 @@ export default function BarberControlPage() {
           'warning'
         );
       } else {
+        setState(previousState);
         showToast(data.error || 'ไม่สามารถยกเลิกคิวได้', 'error');
       }
     } catch {
+      setState(previousState);
       showToast('การเชื่อมต่อขัดข้อง ไม่สามารถยกเลิกคิวได้', 'error');
     } finally {
+      isMutatingRef.current = false;
       setLoadingAction(null);
     }
   };
 
   const handleCancelRow = async (queueId: number, displayCode: string) => {
     if (loadingAction) return;
+    const previousState = state;
     setLoadingAction('cancel');
+    isMutatingRef.current = true;
+    setConfirmCancelId(null);
+
+    if (soundEnabled) {
+      announceQueueSkipped(displayCode);
+    }
+
+    if (state) {
+      const remainingWaiting = state.waitingQueues
+        .filter((q) => q.id !== queueId)
+        .map((q, idx) => ({
+          ...q,
+          queuesAhead: idx + (state.currentServing ? 1 : 0),
+        }));
+      setState({
+        ...state,
+        totalWaiting: remainingWaiting.length,
+        waitingQueues: remainingWaiting,
+        walkInWaitingQueues: remainingWaiting.filter(
+          (q) => q.source === 'WALK_IN'
+        ),
+        lineWaitingQueues: remainingWaiting.filter((q) => q.source === 'LINE'),
+      });
+    }
+
     try {
       const res = await fetch('/api/queue/cancel', {
         method: 'POST',
@@ -213,17 +364,16 @@ export default function BarberControlPage() {
       const data = await res.json();
       if (res.ok && data.state) {
         setState(data.state);
-        setConfirmCancelId(null);
-        if (soundEnabled) {
-          announceQueueSkipped(displayCode);
-        }
         showToast(`ยกเลิกคิว ${displayCode} เรียบร้อยแล้ว`, 'warning');
       } else {
+        if (previousState) setState(previousState);
         showToast(data.error || 'ไม่สามารถยกเลิกคิวได้', 'error');
       }
     } catch {
+      if (previousState) setState(previousState);
       showToast('การเชื่อมต่อขัดข้อง ไม่สามารถยกเลิกคิวได้', 'error');
     } finally {
+      isMutatingRef.current = false;
       setLoadingAction(null);
     }
   };
