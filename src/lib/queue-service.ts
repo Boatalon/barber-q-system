@@ -20,6 +20,18 @@ export interface EnrichedQueueItem extends QueueRow {
   notifiedNear2: boolean;
 }
 
+/**
+ * กรองชื่อร้านให้สะอาดและเป็นธรรมชาติ (ตัดคำว่า "ต่อคิวร้าน", "ต่อคิว", "ร้าน" ที่ซ้ำซ้อนออก)
+ */
+export function formatShopDisplayName(rawName?: string | null): string {
+  if (!rawName) return 'ร้านตัดผม';
+  let name = rawName.trim();
+  name = name.replace(/^ต่อคิวร้าน\s*/i, '');
+  name = name.replace(/^ต่อคิว\s*/i, '');
+  name = name.replace(/^ร้าน\s*/i, '');
+  return name || rawName.trim();
+}
+
 export interface WalkInPopupState {
   active: boolean;
   displayCode: string | null;
@@ -267,12 +279,23 @@ export async function closeShopToday(options?: {
   broadcastMessage?: string;
 }): Promise<{ success: boolean; broadcastSent: boolean }> {
   const today = getTodayDateString();
+  const supabase = getSupabase();
+
   await updateSettings({
     is_shop_closed: true,
     force_open_date: null,
   });
 
-  await addShopHolidays([today], options?.reason || 'วันหยุดประจำร้าน');
+  // บันทึกลง shop_holidays โดยตั้ง notified_on_day: true ทันที เพื่อป้องกันไม่ให้ระบบส่งข้อความซ้ำ
+  await supabase.from('shop_holidays').upsert(
+    {
+      holiday_date: today,
+      reason: options?.reason || 'วันหยุดประจำร้าน',
+      notified_on_day: true,
+      created_at: new Date().toISOString(),
+    },
+    { onConflict: 'holiday_date' }
+  );
 
   let broadcastSent = false;
   if (options?.broadcast && options.broadcastMessage) {
@@ -424,7 +447,7 @@ export async function evaluateQueueNotifications(
             triggerType: 'NEAR_2',
             message: msg,
             flexPayload: {
-              shopName: settings.shop_name,
+              shopName: formatShopDisplayName(settings.shop_name),
               myQueueCode: item.display_code,
               myStatus: 'WAITING',
               currentServingCode,
@@ -449,7 +472,7 @@ export async function evaluateQueueNotifications(
           triggerType: 'NEAR_1',
           message: msg,
           flexPayload: {
-            shopName: settings.shop_name,
+            shopName: formatShopDisplayName(settings.shop_name),
             myQueueCode: item.display_code,
             myStatus: 'WAITING',
             currentServingCode,
@@ -511,7 +534,7 @@ export async function processDueRepeatCalls(): Promise<NotificationLogRow | null
     triggerType: 'RECALL',
     message: msg,
     flexPayload: {
-      shopName: settings.shop_name,
+      shopName: formatShopDisplayName(settings.shop_name),
       myQueueCode: serving.display_code,
       myStatus: 'SERVING',
       currentServingCode: serving.display_code,
@@ -648,7 +671,7 @@ export async function bookLineQueue(
     triggerType: 'BOOKED',
     message: `✅ รับคิวสำเร็จ! หมายเลขคิวของคุณคือ ${newQueue.display_code} (${aheadText})`,
     flexPayload: {
-      shopName: settings.shop_name,
+      shopName: formatShopDisplayName(settings.shop_name),
       myQueueCode: newQueue.display_code,
       myStatus: 'WAITING',
       currentServingCode: updated.serving?.display_code ?? null,
@@ -660,7 +683,7 @@ export async function bookLineQueue(
   // แจ้งเตือนช่างเมื่อลูกค้าจองคิว LINE (ถ้าตั้งค่า barber_line_user_id ไว้)
   if (settings.barber_line_user_id) {
     notifyBarber(settings.barber_line_user_id, {
-      shopName: settings.shop_name,
+      shopName: formatShopDisplayName(settings.shop_name),
       queueCode: newQueue.display_code,
       totalWaiting: updated.waiting.length,
       currentServingCode: updated.serving?.display_code ?? null,
@@ -745,7 +768,7 @@ export async function getLineUserQueueStatus(lineUserId: string): Promise<{
     lastQueueToday: (lastRow as QueueRow | null) ?? null,
     currentServingCode: serving?.display_code ?? null,
     totalWaiting: waiting.length,
-    shopName: settings.shop_name,
+    shopName: formatShopDisplayName(settings.shop_name),
   };
 }
 
@@ -798,7 +821,7 @@ export async function cancelLineQueue(lineUserId: string): Promise<{
     triggerType: 'CANCELLED',
     message: `✖ ยกเลิกคิวหมายเลข ${targetRow.display_code} เรียบร้อยแล้วครับ`,
     flexPayload: {
-      shopName: settings.shop_name,
+      shopName: formatShopDisplayName(settings.shop_name),
       myQueueCode: targetRow.display_code,
       myStatus: 'CANCELLED',
       currentServingCode: serving?.display_code ?? null,
@@ -898,7 +921,7 @@ export async function cancelQueueById(
             ? `✖ คิวหมายเลข ${targetRow.display_code} ของคุณถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการครับ`
             : `✖ คิวหมายเลข ${targetRow.display_code} ถูกยกเลิกแล้วครับ`,
           flexPayload: {
-            shopName: settings.shop_name,
+            shopName: formatShopDisplayName(settings.shop_name),
             myQueueCode: targetRow.display_code,
             myStatus: 'CANCELLED',
             currentServingCode: serving?.display_code ?? null,
@@ -922,7 +945,7 @@ export async function cancelQueueById(
           triggerType: 'CALLED',
           message: `🎉 ถึงคิวหมายเลข ${nextServingCandidate.display_code} ของคุณแล้วครับ! เชิญเข้ารับบริการที่ร้านได้เลยครับ (เรียกครั้งที่ 1/${settings.repeat_call_max_count})`,
           flexPayload: {
-            shopName: settings.shop_name,
+            shopName: formatShopDisplayName(settings.shop_name),
             myQueueCode: nextServingCandidate.display_code,
             myStatus: 'SERVING',
             currentServingCode: nextServingCandidate.display_code,
@@ -998,7 +1021,7 @@ export async function advanceToNextQueue(): Promise<{
           triggerType: 'CALLED',
           message: `🎉 ถึงคิวหมายเลข ${nextWaiting.display_code} ของคุณแล้วครับ! เชิญเข้ารับบริการที่ร้านได้เลยครับ (เรียกครั้งที่ 1/${settings.repeat_call_max_count})`,
           flexPayload: {
-            shopName: settings.shop_name,
+            shopName: formatShopDisplayName(settings.shop_name),
             myQueueCode: nextWaiting.display_code,
             myStatus: 'SERVING',
             currentServingCode: nextWaiting.display_code,
@@ -1057,7 +1080,7 @@ export async function manualRecallCurrentQueue(): Promise<{
       triggerType: 'RECALL',
       message: msg,
       flexPayload: {
-        shopName: settings.shop_name,
+        shopName: formatShopDisplayName(settings.shop_name),
         myQueueCode: serving.display_code,
         myStatus: 'SERVING',
         currentServingCode: serving.display_code,
@@ -1155,20 +1178,6 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
       'วันนี้ร้านปิดให้บริการ (วันหยุด)'
     : null;
 
-  // ส่งบรอดแคสต์แจ้งเตือนอัตโนมัติในเช้าวันหยุด (ถ้ายังไม่เคยส่งมาก่อน)
-  if (
-    holidayData &&
-    !(holidayData as { notified_on_day?: boolean }).notified_on_day &&
-    !isForceOpen
-  ) {
-    const holidayMsg = `📢 ประกาศจากร้าน ${settings.shop_name}\nวันนี้ (${today}) ทางร้านหยุดให้บริการนะครับ ขออภัยในความไม่สะดวก แล้วพบกันใหม่ในวันทำการถัดไปครับ 💈✂️`;
-    void broadcastLineMessage(holidayMsg).catch(() => {});
-    void supabase
-      .from('shop_holidays')
-      .update({ notified_on_day: true })
-      .eq('id', (holidayData as { id: number }).id);
-  }
-
   // ตรวจสอบการส่งแจ้งเตือนซ้ำอัตโนมัติใน LINE โดยไม่ต้องดึง DB ซ้ำอีกรอบ
   if (
     serving &&
@@ -1199,7 +1208,7 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
           triggerType: 'RECALL',
           message: `📢 เรียกคิวซ้ำ (${nextCallCount}/${settings.repeat_call_max_count}): ถึงคิวหมายเลข ${serving.display_code} แล้วครับ กรุณาเข้ารับบริการที่ร้าน`,
           flexPayload: {
-            shopName: settings.shop_name,
+            shopName: formatShopDisplayName(settings.shop_name),
             myQueueCode: serving.display_code,
             myStatus: 'SERVING',
             currentServingCode: serving.display_code,

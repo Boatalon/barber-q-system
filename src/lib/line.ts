@@ -245,10 +245,7 @@ export async function sendLineNotification(params: {
   if (client && !isSimulatedUser) {
     try {
       const messages: messagingApi.Message[] = params.flexPayload
-        ? [
-            buildQueueFlexMessage(params.flexPayload),
-            { type: 'text', text: params.message },
-          ]
+        ? [buildQueueFlexMessage(params.flexPayload)]
         : [{ type: 'text', text: params.message }];
 
       await client.pushMessage({
