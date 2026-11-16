@@ -45,6 +45,8 @@ export async function PUT(req: NextRequest) {
         body.walkin_popup_duration_sec !== undefined
           ? Number(body.walkin_popup_duration_sec)
           : undefined,
+      barber_line_user_id:
+        'barber_line_user_id' in body ? (body.barber_line_user_id ?? null) : undefined,
     });
     const state = await getSystemQueueState();
     return NextResponse.json({

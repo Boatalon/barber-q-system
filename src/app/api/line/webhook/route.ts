@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
       const userId = event.source.userId;
       if (!userId) continue;
 
-      let action: 'book' | 'status' | 'cancel' | 'welcome' | null = null;
+      let action: 'book' | 'status' | 'cancel' | 'welcome' | 'myid' | null = null;
 
       if (event.type === 'follow') {
         action = 'welcome';
@@ -54,15 +54,24 @@ export async function POST(req: NextRequest) {
           action = 'cancel';
       } else if (event.type === 'message' && event.message.type === 'text') {
         const text = event.message.text.trim();
+        const lower = text.toLowerCase();
         if (
+          lower === 'myid' ||
+          lower === 'id' ||
+          lower === 'userid' ||
+          text === 'ไอดี' ||
+          text === 'ขอไอดี'
+        ) {
+          action = 'myid';
+        } else if (
           text.includes('รับคิว') ||
           text.includes('จองคิว') ||
-          text.toLowerCase() === 'book'
+          lower === 'book'
         ) {
           action = 'book';
         } else if (
           text.includes('ยกเลิก') ||
-          text.toLowerCase() === 'cancel'
+          lower === 'cancel'
         ) {
           action = 'cancel';
         } else if (
@@ -88,6 +97,11 @@ export async function POST(req: NextRequest) {
           }\n• คิวรอทั้งหมด: ${
             statusInfo.totalWaiting
           } คิว\n\nสามารถกดเมนู "รับคิว" ด้านล่าง หรือพิมพ์คำว่า "รับคิว" เพื่อรับหมายเลขคิวได้ทันทีโดยไม่ต้องกรอกชื่อหรือเบอร์โทรครับ`,
+        });
+      } else if (action === 'myid') {
+        replyMessages.push({
+          type: 'text',
+          text: `LINE User ID ของคุณคือ:\n${userId}\n\n(สามารถคัดลอกรหัสนี้ไปใส่ในหน้าตั้งค่าระบบ "LINE User ID ของช่าง" เพื่อรับการแจ้งเตือนเมื่อมีลูกค้าจองคิวครับ)`,
         });
       } else if (action === 'book') {
         const booked = await bookLineQueue(userId);

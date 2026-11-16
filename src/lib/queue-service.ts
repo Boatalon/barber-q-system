@@ -6,7 +6,7 @@ import {
   type QueueRow,
   type ShopSettings,
 } from './db';
-import { isLineConfigured, sendLineNotification } from './line';
+import { getLineClient, isLineConfigured, sendLineNotification } from './line';
 
 export interface EnrichedQueueItem extends QueueRow {
   queuesAhead: number;
@@ -64,6 +64,7 @@ export async function getSettings(): Promise<ShopSettings> {
     repeat_call_interval_sec: 60,
     repeat_call_max_count: 3,
     walkin_popup_duration_sec: 6,
+    barber_line_user_id: null,
     last_walkin_display_code: null,
     last_walkin_created_at: null,
     updated_at: new Date().toISOString(),
@@ -83,13 +84,14 @@ export async function updateSettings(
       | 'repeat_call_interval_sec'
       | 'repeat_call_max_count'
       | 'walkin_popup_duration_sec'
+      | 'barber_line_user_id'
     >
   >
 ): Promise<ShopSettings> {
   const supabase = getSupabase();
   const current = await getSettings();
 
-  const next = {
+  const next: Partial<ShopSettings> & { updated_at: string } = {
     shop_name: input.shop_name?.trim() || current.shop_name,
     notify_ahead_first:
       typeof input.notify_ahead_first === 'number'
@@ -111,6 +113,10 @@ export async function updateSettings(
       typeof input.walkin_popup_duration_sec === 'number'
         ? Math.max(3, Math.min(30, Math.floor(input.walkin_popup_duration_sec)))
         : current.walkin_popup_duration_sec,
+    barber_line_user_id:
+      'barber_line_user_id' in input
+        ? (input.barber_line_user_id?.trim() || null)
+        : current.barber_line_user_id,
     updated_at: new Date().toISOString(),
   };
 
@@ -498,11 +504,57 @@ export async function bookLineQueue(
     },
   });
 
+  // แจ้งเตือนช่างเมื่อลูกค้าจองคิว LINE (ถ้าตั้งค่า barber_line_user_id ไว้)
+  if (settings.barber_line_user_id) {
+    notifyBarber(settings.barber_line_user_id, {
+      shopName: settings.shop_name,
+      queueCode: newQueue.display_code,
+      totalWaiting: updated.waiting.length,
+      currentServingCode: updated.serving?.display_code ?? null,
+      customerLabel: customerLabel ?? null,
+    }).catch((err) => console.error('[Barber Notify Error]:', err));
+  }
+
   return {
     isNew: true,
     queue: newQueue,
     currentServingCode: updated.serving?.display_code ?? null,
   };
+}
+
+/**
+ * ส่งข้อความแจ้งเตือนไปยังบัญชี LINE ส่วนตัวของช่าง
+ */
+async function notifyBarber(
+  barberLineUserId: string,
+  info: {
+    shopName: string;
+    queueCode: string;
+    totalWaiting: number;
+    currentServingCode: string | null;
+    customerLabel: string | null;
+  }
+): Promise<void> {
+  const client = getLineClient();
+  if (!client) return;
+
+  const servingText = info.currentServingCode
+    ? `กำลังให้บริการคิว: ${info.currentServingCode}`
+    : 'ยังไม่มีคิวที่กำลังให้บริการ';
+
+  const lines = [
+    `🔔 มีลูกค้าใหม่จองคิว LINE`,
+    ``,
+    `📋 หมายเลขคิว: ${info.queueCode}`,
+    info.customerLabel ? `👤 ลูกค้า: ${info.customerLabel}` : null,
+    `👥 คิวรอทั้งหมด: ${info.totalWaiting} คิว`,
+    `💈 ${servingText}`,
+  ].filter((l): l is string => l !== null);
+
+  await client.pushMessage({
+    to: barberLineUserId,
+    messages: [{ type: 'text', text: lines.join('\n') }],
+  });
 }
 
 /**

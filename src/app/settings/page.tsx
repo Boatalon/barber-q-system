@@ -8,6 +8,9 @@ import {
   CheckCircle2,
   AlertTriangle,
   AlertCircle,
+  MessageCircle,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import type { ShopSettings } from '@/lib/db';
 
@@ -19,7 +22,9 @@ export default function SettingsPage() {
     repeat_call_interval_sec: 60,
     repeat_call_max_count: 3,
     walkin_popup_duration_sec: 6,
+    barber_line_user_id: '',
   });
+  const [showBarberUserId, setShowBarberUserId] = useState(false);
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -38,6 +43,7 @@ export default function SettingsPage() {
             repeat_call_interval_sec: data.settings.repeat_call_interval_sec,
             repeat_call_max_count: data.settings.repeat_call_max_count,
             walkin_popup_duration_sec: data.settings.walkin_popup_duration_sec,
+            barber_line_user_id: data.settings.barber_line_user_id ?? '',
           });
         }
       })
@@ -63,7 +69,10 @@ export default function SettingsPage() {
       const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form),
+        body: JSON.stringify({
+          ...form,
+          barber_line_user_id: form.barber_line_user_id.trim() || null,
+        }),
       });
       if (res.ok) {
         setSavedBanner('บันทึกการตั้งค่าเรียบร้อยแล้ว');
@@ -243,6 +252,60 @@ export default function SettingsPage() {
                 }
                 className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
               />
+            </div>
+          </div>
+
+          {/* แจ้งเตือนช่างผ่าน LINE */}
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3.5 space-y-2.5">
+            <div className="flex items-center gap-2">
+              <MessageCircle className="h-4 w-4 text-emerald-700 shrink-0" />
+              <span className="text-xs sm:text-sm font-bold text-emerald-900">
+                แจ้งเตือนช่างผ่าน LINE (ไม่บังคับ)
+              </span>
+            </div>
+            <p className="text-xs text-emerald-800 leading-relaxed">
+              เมื่อลูกค้าจองคิว LINE ระบบจะส่งข้อความแจ้งเตือนไปยังบัญชี LINE ส่วนตัวของช่างทันที
+              ช่างต้องเพิ่มเพื่อน LINE OA ของร้านก่อนถึงจะรับข้อความได้
+            </p>
+            <div>
+              <label
+                htmlFor="barber_line_user_id"
+                className="block text-xs font-bold text-emerald-900 mb-1.5"
+              >
+                LINE User ID ของช่าง
+              </label>
+              <div className="relative">
+                <input
+                  id="barber_line_user_id"
+                  type={showBarberUserId ? 'text' : 'password'}
+                  value={form.barber_line_user_id}
+                  onChange={(e) =>
+                    setForm((prev) => ({
+                      ...prev,
+                      barber_line_user_id: e.target.value,
+                    }))
+                  }
+                  placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                  className="w-full rounded-xl border border-emerald-300 bg-white px-3.5 py-2.5 pr-10 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowBarberUserId((v) => !v)}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                  aria-label={showBarberUserId ? 'ซ่อน User ID' : 'แสดง User ID'}
+                >
+                  {showBarberUserId ? (
+                    <EyeOff className="h-4 w-4" />
+                  ) : (
+                    <Eye className="h-4 w-4" />
+                  )}
+                </button>
+              </div>
+              <p className="mt-1.5 text-[11px] text-emerald-700">
+                💡 วิธีหา LINE User ID: ให้ช่างเปิดแชท LINE OA ของร้าน แล้วพิมพ์คำว่า{' '}
+                <strong className="underline">myid</strong> ส่งไป บอทจะตอบกลับรหัส User ID ของคุณทันที
+                สามารถคัดลอกมาวางในช่องนี้ได้เลย
+              </p>
             </div>
           </div>
 

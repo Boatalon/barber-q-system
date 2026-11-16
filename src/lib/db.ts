@@ -29,6 +29,7 @@ export interface ShopSettings {
   repeat_call_interval_sec: number;
   repeat_call_max_count: number;
   walkin_popup_duration_sec: number;
+  barber_line_user_id: string | null;
   last_walkin_display_code: string | null;
   last_walkin_created_at: string | null;
   updated_at: string;
