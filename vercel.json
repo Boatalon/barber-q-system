@@ -5,6 +5,10 @@
     {
       "path": "/api/queue/cleanup",
       "schedule": "0 20 */3 * *"
+    },
+    {
+      "path": "/api/cron/holiday-notify",
+      "schedule": "0 2 * * *"
     }
   ]
 }
