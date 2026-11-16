@@ -30,9 +30,19 @@ export interface ShopSettings {
   repeat_call_max_count: number;
   walkin_popup_duration_sec: number;
   barber_line_user_id: string | null;
+  is_shop_closed: boolean;
+  force_open_date: string | null;
   last_walkin_display_code: string | null;
   last_walkin_created_at: string | null;
   updated_at: string;
+}
+
+export interface ShopHolidayRow {
+  id: number;
+  holiday_date: string;
+  reason: string;
+  notified_on_day: boolean;
+  created_at: string;
 }
 
 export interface NotificationLogRow {

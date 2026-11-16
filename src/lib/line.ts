@@ -290,3 +290,25 @@ export async function sendLineNotification(params: {
     }
   );
 }
+
+/**
+ * ส่งข้อความบรอดแคสต์ไปยังลูกค้าที่เป็นเพื่อนทั้งหมดใน LINE OA
+ */
+export async function broadcastLineMessage(
+  messageText: string
+): Promise<{ success: boolean; error?: string }> {
+  const client = getLineClient();
+  if (!client) {
+    return { success: false, error: 'ยังไม่ได้ตั้งค่า LINE Messaging API' };
+  }
+  try {
+    await client.broadcast({
+      messages: [{ type: 'text', text: messageText }],
+    });
+    return { success: true };
+  } catch (err: unknown) {
+    console.error('[LINE Broadcast Error]:', err);
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    return { success: false, error: errorMsg };
+  }
+}

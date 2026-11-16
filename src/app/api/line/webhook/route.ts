@@ -5,6 +5,7 @@ import {
   cancelLineQueue,
   getLineUserQueueStatus,
   getSettings,
+  isShopClosedToday,
 } from '@/lib/queue-service';
 import {
   buildQueueFlexMessage,
@@ -89,37 +90,63 @@ export async function POST(req: NextRequest) {
       const replyMessages: messagingApi.Message[] = [];
 
       if (action === 'welcome') {
-        const statusInfo = await getLineUserQueueStatus(userId);
-        replyMessages.push({
-          type: 'text',
-          text: `ยินดีต้อนรับสู่ ${settings.shop_name} ครับ 💈\n• คิวที่กำลังตัดปัจจุบัน: ${
-            statusInfo.currentServingCode ?? 'ยังไม่มีคิว'
-          }\n• คิวรอทั้งหมด: ${
-            statusInfo.totalWaiting
-          } คิว\n\nสามารถกดเมนู "รับคิว" ด้านล่าง หรือพิมพ์คำว่า "รับคิว" เพื่อรับหมายเลขคิวได้ทันทีโดยไม่ต้องกรอกชื่อหรือเบอร์โทรครับ`,
-        });
+        const [statusInfo, closedInfo] = await Promise.all([
+          getLineUserQueueStatus(userId),
+          isShopClosedToday(),
+        ]);
+        if (closedInfo.isClosed) {
+          replyMessages.push({
+            type: 'text',
+            text: `ยินดีต้อนรับสู่ ${settings.shop_name} ครับ 💈\n\n📌 วันนี้ทางร้านปิดให้บริการ (${closedInfo.reason || 'วันหยุด'})\nจึงยังไม่เปิดรับคิวในวันนี้ครับ สามารถติดตามวันเปิดทำการได้ทางไลน์นี้นะครับ ขอบคุณครับ`,
+          });
+        } else {
+          replyMessages.push({
+            type: 'text',
+            text: `ยินดีต้อนรับสู่ ${settings.shop_name} ครับ 💈\n• คิวที่กำลังตัดปัจจุบัน: ${
+              statusInfo.currentServingCode ?? 'ยังไม่มีคิว'
+            }\n• คิวรอทั้งหมด: ${
+              statusInfo.totalWaiting
+            } คิว\n\nสามารถกดเมนู "รับคิว" ด้านล่าง หรือพิมพ์คำว่า "รับคิว" เพื่อรับหมายเลขคิวได้ทันทีโดยไม่ต้องกรอกชื่อหรือเบอร์โทรครับ`,
+          });
+        }
       } else if (action === 'myid') {
         replyMessages.push({
           type: 'text',
           text: `LINE User ID ของคุณคือ:\n${userId}\n\n(สามารถคัดลอกรหัสนี้ไปใส่ในหน้าตั้งค่าระบบ "LINE User ID ของช่าง" เพื่อรับการแจ้งเตือนเมื่อมีลูกค้าจองคิวครับ)`,
         });
       } else if (action === 'book') {
-        const booked = await bookLineQueue(userId);
-        replyMessages.push(
-          buildQueueFlexMessage({
-            shopName: settings.shop_name,
-            myQueueCode: booked.queue.display_code,
-            myStatus: booked.queue.status,
-            currentServingCode: booked.currentServingCode,
-            queuesAhead: booked.queue.queuesAhead,
-            headlineText: booked.isNew
-              ? '✅ รับคิวตัดผมสำเร็จ!'
-              : '📌 คุณมีหมายเลขคิวที่ใช้งานอยู่แล้ว',
-          })
-        );
+        const closedInfo = await isShopClosedToday();
+        if (closedInfo.isClosed) {
+          replyMessages.push({
+            type: 'text',
+            text: `⛔ ขออภัยครับ วันนี้ทางร้านปิดให้บริการ (${closedInfo.reason || 'วันหยุด'})\n\nจึงยังไม่เปิดรับคิวในขณะนี้ สามารถติดตามวันเปิดทำการได้ทางไลน์นี้นะครับ 💈✂️`,
+          });
+        } else {
+          const booked = await bookLineQueue(userId);
+          replyMessages.push(
+            buildQueueFlexMessage({
+              shopName: settings.shop_name,
+              myQueueCode: booked.queue.display_code,
+              myStatus: booked.queue.status,
+              currentServingCode: booked.currentServingCode,
+              queuesAhead: booked.queue.queuesAhead,
+              headlineText: booked.isNew
+                ? '✅ รับคิวตัดผมสำเร็จ!'
+                : '📌 คุณมีหมายเลขคิวที่ใช้งานอยู่แล้ว',
+            })
+          );
+        }
       } else if (action === 'status') {
-        const statusInfo = await getLineUserQueueStatus(userId);
-        if (statusInfo.activeQueue) {
+        const [statusInfo, closedInfo] = await Promise.all([
+          getLineUserQueueStatus(userId),
+          isShopClosedToday(),
+        ]);
+        if (closedInfo.isClosed) {
+          replyMessages.push({
+            type: 'text',
+            text: `💈 วันนี้ทางร้านปิดให้บริการ (${closedInfo.reason || 'วันหยุด'})\n\nไม่มีคิวที่กำลังให้บริการในระบบ ขอบคุณครับ ✂️`,
+          });
+        } else if (statusInfo.activeQueue) {
           replyMessages.push(
             buildQueueFlexMessage({
               shopName: settings.shop_name,

@@ -409,6 +409,27 @@ export default function BarberControlPage() {
         </div>
       )}
 
+      {/* แจ้งเตือนเมื่อร้านปิดเป็นวันหยุด */}
+      {state?.isShopClosedToday && (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-bold text-rose-900"
+        >
+          <div className="flex items-center gap-2">
+            <span className="flex h-2 w-2 rounded-full bg-rose-600 animate-pulse shrink-0" />
+            <span>
+              ขณะนี้ร้านตั้งสถานะเป็น <strong>วันหยุด</strong> ({state.shopClosedReason || 'ปิดให้บริการ'}) — ลูกค้าไม่สามารถจองคิวผ่าน LINE ได้
+            </span>
+          </div>
+          <Link
+            href="/settings"
+            className="rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-rose-700 shrink-0"
+          >
+            จัดการวันหยุด
+          </Link>
+        </div>
+      )}
+
       {/* แถบแจ้งผลการกดปุ่ม */}
       {toastMessage && (
         <div

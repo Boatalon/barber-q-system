@@ -4,9 +4,15 @@ import {
   getTodayDateString,
   type NotificationLogRow,
   type QueueRow,
+  type ShopHolidayRow,
   type ShopSettings,
 } from './db';
-import { getLineClient, isLineConfigured, sendLineNotification } from './line';
+import {
+  broadcastLineMessage,
+  getLineClient,
+  isLineConfigured,
+  sendLineNotification,
+} from './line';
 
 export interface EnrichedQueueItem extends QueueRow {
   queuesAhead: number;
@@ -35,6 +41,8 @@ export interface SystemQueueState {
   settings: ShopSettings;
   recentNotifications: NotificationLogRow[];
   lineConfigured: boolean;
+  isShopClosedToday: boolean;
+  shopClosedReason: string | null;
   repeatStatus: {
     canAutoRepeat: boolean;
     isRepeatExhausted: boolean;
@@ -65,6 +73,8 @@ export async function getSettings(): Promise<ShopSettings> {
     repeat_call_max_count: 3,
     walkin_popup_duration_sec: 6,
     barber_line_user_id: null,
+    is_shop_closed: false,
+    force_open_date: null,
     last_walkin_display_code: null,
     last_walkin_created_at: null,
     updated_at: new Date().toISOString(),
@@ -85,6 +95,8 @@ export async function updateSettings(
       | 'repeat_call_max_count'
       | 'walkin_popup_duration_sec'
       | 'barber_line_user_id'
+      | 'is_shop_closed'
+      | 'force_open_date'
     >
   >
 ): Promise<ShopSettings> {
@@ -117,6 +129,14 @@ export async function updateSettings(
       'barber_line_user_id' in input
         ? (input.barber_line_user_id?.trim() || null)
         : current.barber_line_user_id,
+    is_shop_closed:
+      typeof input.is_shop_closed === 'boolean'
+        ? input.is_shop_closed
+        : current.is_shop_closed,
+    force_open_date:
+      'force_open_date' in input
+        ? (input.force_open_date?.trim() || null)
+        : current.force_open_date,
     updated_at: new Date().toISOString(),
   };
 
@@ -128,6 +148,139 @@ export async function updateSettings(
     .single();
 
   return (data as ShopSettings) ?? { ...current, ...next };
+}
+
+/**
+ * ตรวจสอบว่าวันนี้ร้านปิดให้บริการ (วันหยุด) หรือไม่
+ */
+export async function isShopClosedToday(): Promise<{
+  isClosed: boolean;
+  reason: string | null;
+}> {
+  const supabase = getSupabase();
+  const today = getTodayDateString();
+  const settings = await getSettings();
+
+  // หากช่างสั่งเปิดร้านฉุกเฉินในวันนี้ (force_open_date) ให้ถือว่าร้านเปิด
+  if (settings.force_open_date === today) {
+    return { isClosed: false, reason: null };
+  }
+
+  // หากมีการสลับปิดร้านแบบ manual
+  if (settings.is_shop_closed) {
+    return { isClosed: true, reason: 'วันนี้ร้านปิดให้บริการ (วันหยุด)' };
+  }
+
+  // ตรวจสอบวันหยุดที่ตั้งไว้ในตาราง shop_holidays
+  const { data: holiday } = await supabase
+    .from('shop_holidays')
+    .select('*')
+    .eq('holiday_date', today)
+    .maybeSingle();
+
+  if (holiday) {
+    return {
+      isClosed: true,
+      reason: holiday.reason || 'วันนี้ร้านปิดให้บริการ (วันหยุด)',
+    };
+  }
+
+  return { isClosed: false, reason: null };
+}
+
+/**
+ * ดึงรายการวันหยุดทั้งหมดที่ตั้งไว้ (เรียงตามวันที่)
+ */
+export async function getShopHolidays(): Promise<ShopHolidayRow[]> {
+  const supabase = getSupabase();
+  const { data } = await supabase
+    .from('shop_holidays')
+    .select('*')
+    .order('holiday_date', { ascending: true });
+
+  return (data as ShopHolidayRow[]) ?? [];
+}
+
+/**
+ * บันทึกวันหยุดใหม่ (รองรับการเพิ่มทีละหลายวัน)
+ */
+export async function addShopHolidays(
+  dates: string[],
+  reason = 'วันหยุดประจำร้าน'
+): Promise<ShopHolidayRow[]> {
+  const supabase = getSupabase();
+  if (!dates.length) return getShopHolidays();
+
+  const rows = dates.map((d) => ({
+    holiday_date: d,
+    reason,
+    notified_on_day: false,
+    created_at: new Date().toISOString(),
+  }));
+
+  await supabase
+    .from('shop_holidays')
+    .upsert(rows, { onConflict: 'holiday_date' });
+  return getShopHolidays();
+}
+
+/**
+ * ลบวันหยุดออก (เมื่อช่างยกเลิกวันหยุดนั้น)
+ */
+export async function removeShopHoliday(date: string): Promise<void> {
+  const supabase = getSupabase();
+  await supabase.from('shop_holidays').delete().eq('holiday_date', date);
+}
+
+/**
+ * ช่างเปลี่ยนใจมาเปิดร้านวันนี้ (ยกเลิกวันหยุด พร้อมตัวเลือกบรอดแคสต์บอกลูกค้า)
+ */
+export async function openShopToday(options?: {
+  broadcast?: boolean;
+  broadcastMessage?: string;
+}): Promise<{ success: boolean; broadcastSent: boolean }> {
+  const today = getTodayDateString();
+
+  await updateSettings({
+    is_shop_closed: false,
+    force_open_date: today,
+  });
+
+  // ลบวันหยุดของวันนี้ออกจากตารางถ้ามี
+  await removeShopHoliday(today);
+
+  let broadcastSent = false;
+  if (options?.broadcast && options.broadcastMessage) {
+    const res = await broadcastLineMessage(options.broadcastMessage);
+    broadcastSent = res.success;
+  }
+
+  return { success: true, broadcastSent };
+}
+
+/**
+ * สลับสถานะปิดร้านวันนี้ (ตั้งเป็นวันหยุดฉุกเฉิน)
+ */
+export async function closeShopToday(options?: {
+  reason?: string;
+  broadcast?: boolean;
+  broadcastMessage?: string;
+}): Promise<{ success: boolean; broadcastSent: boolean }> {
+  const today = getTodayDateString();
+  await updateSettings({
+    is_shop_closed: true,
+    force_open_date: null,
+  });
+
+  await addShopHolidays([today], options?.reason || 'วันหยุดประจำร้าน');
+
+  let broadcastSent = false;
+  if (options?.broadcast && options.broadcastMessage) {
+    const res = await broadcastLineMessage(options.broadcastMessage);
+    broadcastSent = res.success;
+  }
+
+  return { success: true, broadcastSent };
 }
 
 /**
@@ -964,6 +1117,7 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
     { data: recentHistoryData },
     { data: lastRowData },
     { data: recentNotificationsData },
+    { data: holidayData },
   ] = await Promise.all([
     getSettings(),
     getActiveQueuesWithPosition(today),
@@ -986,7 +1140,34 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
       .select('*')
       .order('id', { ascending: false })
       .limit(25),
+    supabase
+      .from('shop_holidays')
+      .select('*')
+      .eq('holiday_date', today)
+      .maybeSingle(),
   ]);
+
+  const isForceOpen = settings.force_open_date === today;
+  const isShopClosedToday =
+    !isForceOpen && (settings.is_shop_closed || Boolean(holidayData));
+  const shopClosedReason = isShopClosedToday
+    ? (holidayData as { reason?: string } | null)?.reason ||
+      'วันนี้ร้านปิดให้บริการ (วันหยุด)'
+    : null;
+
+  // ส่งบรอดแคสต์แจ้งเตือนอัตโนมัติในเช้าวันหยุด (ถ้ายังไม่เคยส่งมาก่อน)
+  if (
+    holidayData &&
+    !(holidayData as { notified_on_day?: boolean }).notified_on_day &&
+    !isForceOpen
+  ) {
+    const holidayMsg = `📢 ประกาศจากร้าน ${settings.shop_name}\nวันนี้ (${today}) ทางร้านหยุดให้บริการนะครับ ขออภัยในความไม่สะดวก แล้วพบกันใหม่ในวันทำการถัดไปครับ 💈✂️`;
+    void broadcastLineMessage(holidayMsg).catch(() => {});
+    void supabase
+      .from('shop_holidays')
+      .update({ notified_on_day: true })
+      .eq('id', (holidayData as { id: number }).id);
+  }
 
   // ตรวจสอบการส่งแจ้งเตือนซ้ำอัตโนมัติใน LINE โดยไม่ต้องดึง DB ซ้ำอีกรอบ
   if (
@@ -1095,6 +1276,8 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
     settings,
     recentNotifications,
     lineConfigured: isLineConfigured(),
+    isShopClosedToday,
+    shopClosedReason,
     repeatStatus,
   };
 }

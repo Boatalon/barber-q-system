@@ -105,6 +105,12 @@ export default function ShopDisplayPage() {
         </div>
 
         <div className="flex items-center gap-2">
+          {state?.isShopClosedToday && (
+            <span className="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/50 bg-rose-900/60 px-3 py-1.5 text-xs font-bold text-rose-200">
+              <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
+              <span>วันนี้ร้านปิดทำการ</span>
+            </span>
+          )}
           <button
             onClick={() => setSoundEnabled(!soundEnabled)}
             className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-slate-800"
