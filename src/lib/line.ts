@@ -292,22 +292,75 @@ export async function sendLineNotification(params: {
 }
 
 /**
- * ส่งข้อความบรอดแคสต์ไปยังลูกค้าที่เป็นเพื่อนทั้งหมดใน LINE OA
+ * ส่งข้อความประกาศไปยังลูกค้าทุกคน (ยกเว้นบัญชี LINE ของช่าง)
  */
 export async function broadcastLineMessage(
   messageText: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; recipientCount?: number; error?: string }> {
   const client = getLineClient();
   if (!client) {
     return { success: false, error: 'ยังไม่ได้ตั้งค่า LINE Messaging API' };
   }
+
+  const supabase = getSupabase();
+  const { data: settingsData } = await supabase
+    .from('shop_settings')
+    .select('barber_line_user_id')
+    .eq('id', 1)
+    .maybeSingle();
+
+  const barberId = settingsData?.barber_line_user_id ?? null;
+
+  // รวบรวม LINE User ID ของลูกค้าจาก line_followers, queues, และ notification_logs
+  const [fRes, qRes, nRes] = await Promise.all([
+    supabase.from('line_followers').select('line_user_id'),
+    supabase.from('queues').select('line_user_id').not('line_user_id', 'is', null),
+    supabase.from('notification_logs').select('line_user_id').not('line_user_id', 'is', null),
+  ]);
+
+  const allUserIds = new Set<string>();
+  (fRes.data || []).forEach((r: { line_user_id?: string }) => {
+    if (r.line_user_id) allUserIds.add(r.line_user_id);
+  });
+  (qRes.data || []).forEach((r: { line_user_id?: string }) => {
+    if (r.line_user_id) allUserIds.add(r.line_user_id);
+  });
+  (nRes.data || []).forEach((r: { line_user_id?: string }) => {
+    if (r.line_user_id) allUserIds.add(r.line_user_id);
+  });
+
+  // กรอง: ไม่ส่งหาช่าง (barberId) และไม่ส่งหา id จำลอง (sim_)
+  const targetUserIds = Array.from(allUserIds).filter(
+    (id) => id && id !== barberId && !id.startsWith('sim_')
+  );
+
   try {
-    await client.broadcast({
-      messages: [{ type: 'text', text: messageText }],
-    });
-    return { success: true };
+    if (targetUserIds.length > 0) {
+      // ส่งด้วย multicast เป็นชุดละไม่เกิน 500 คนตามสเปกของ LINE Messaging API
+      const batchSize = 500;
+      for (let i = 0; i < targetUserIds.length; i += batchSize) {
+        const batch = targetUserIds.slice(i, i + batchSize);
+        await client.multicast({
+          to: batch,
+          messages: [{ type: 'text', text: messageText }],
+        });
+      }
+      return { success: true, recipientCount: targetUserIds.length };
+    }
+
+    // กรณีไม่มีรายชื่อลูกค้าในฐานข้อมูลเลย:
+    // หากไม่ได้ระบุ barberId สามารถ broadcast หาผู้ติดตามทั้งหมดได้
+    // แต่ถ้าระบุ barberId ไว้แล้ว จะไม่ใช้ broadcast ทั่วไปเพื่อป้องกันไม่ให้ข้อความส่งไปรบกวนช่าง
+    if (!barberId) {
+      await client.broadcast({
+        messages: [{ type: 'text', text: messageText }],
+      });
+      return { success: true };
+    }
+
+    return { success: true, recipientCount: 0 };
   } catch (err: unknown) {
-    console.error('[LINE Broadcast Error]:', err);
+    console.error('[LINE Broadcast/Multicast Error]:', err);
     const errorMsg = err instanceof Error ? err.message : String(err);
     return { success: false, error: errorMsg };
   }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { validateSignature, WebhookEvent, messagingApi } from '@line/bot-sdk';
+import { getSupabase } from '@/lib/db';
 import {
   bookLineQueue,
   cancelLineQueue,
@@ -40,6 +41,15 @@ export async function POST(req: NextRequest) {
     for (const event of events) {
       const userId = event.source.userId;
       if (!userId) continue;
+
+      // บันทึก userId ของลูกค้าลงตาราง line_followers (ยกเว้นบัญชี LINE ของช่าง)
+      if (userId !== settings.barber_line_user_id && !userId.startsWith('sim_')) {
+        const supabase = getSupabase();
+        void supabase
+          .from('line_followers')
+          .upsert({ line_user_id: userId }, { onConflict: 'line_user_id' })
+          .then(() => {}, () => {});
+      }
 
       let action: 'book' | 'status' | 'cancel' | 'welcome' | 'myid' | null = null;
 

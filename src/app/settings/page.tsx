@@ -550,7 +550,7 @@ export default function SettingsPage() {
         {/* ปุ่มเด่นสุด: ถ้าเปิดอยู่ โชว์ "หยุดงานวันนี้ (ปิดร้านด่วน)" ปุ่มใหญ่สีแดงกดง่ายสุด / ถ้าปิดอยู่ โชว์ "เปิดร้านวันนี้" สีเขียว */}
         {!isShopClosedToday ? (
           <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-            {/* ปุ่มหยุดงานวันนี้ (เด่นชัด ปุ่มใหญ่สะดุดตา สำหรับเหตุฉุกเฉิน) */}
+            {/* ปุ่มหยุดงานวันนี้ (เด่นชัด ปุ่มใหญ่สะดุดตา) */}
             <button
               type="button"
               onClick={() => setShowQuickCloseDialog(true)}
@@ -561,7 +561,7 @@ export default function SettingsPage() {
               </div>
               <div className="text-left">
                 <div className="text-sm sm:text-base font-extrabold leading-tight">
-                  หยุดงานวันนี้ (ปิดร้านด่วน)
+                  หยุดงานวันนี้
                 </div>
                 <div className="text-[11px] text-rose-100 font-medium">
                   กดเพื่อปิดรับคิว LINE ทันที & ส่งแจ้งลูกค้า
@@ -1276,7 +1276,7 @@ export default function SettingsPage() {
                   id="quick-close-title"
                   className="text-sm sm:text-base font-extrabold text-slate-900"
                 >
-                  ยืนยันหยุดงานวันนี้ (ปิดร้านด่วน)?
+                  ยืนยันหยุดงานวันนี้?
                 </h2>
                 <p className="mt-0.5 text-xs text-slate-600 leading-relaxed">
                   ระบบจะปิดรับคิว LINE ทันที และแจ้งเตือนลูกค้าว่าวันนี้ร้านปิดทำการ
