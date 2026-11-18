@@ -19,7 +19,7 @@ body {
 
 html, body { overflow-x: clip; }
 
-.barber-page { padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
+.barber-page { padding-bottom: calc(24px + env(safe-area-inset-bottom)); }
 .barber-status { position: relative; overflow: hidden; }
 .barber-status::before,
 .shop-display-header::before {
@@ -32,14 +32,8 @@ html, body { overflow-x: clip; }
   background: repeating-linear-gradient(110deg, #db2030 0 18px, #fff 18px 31px, #224da3 31px 49px, #fff 49px 62px);
 }
 .barber-actions {
-  position: fixed;
-  z-index: 30;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
-  background: linear-gradient(to top, #f8fafc 84%, rgba(248,250,252,.92));
-  border-top: 1px solid #e2e8f0;
+  max-width: 700px;
+  margin-inline: auto;
 }
 .shop-display {
   width: 100%;
@@ -54,7 +48,6 @@ html, body { overflow-x: clip; }
 .display-code { font-size: clamp(5rem, 20vmin, 18rem); }
 @media (min-width: 768px) {
   .barber-page { padding-bottom: 40px; }
-  .barber-actions { position: static; max-width: 700px; margin-inline: auto; padding: 0; background: none; border: 0; }
 }
 @media (max-width: 1023px) {
   .shop-display-grid { grid-template-rows: minmax(0, 1.4fr) minmax(0, 1fr); }
