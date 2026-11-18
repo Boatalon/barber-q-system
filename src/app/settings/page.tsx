@@ -290,11 +290,15 @@ export default function SettingsPage() {
       const payload = activeTab === 'shop'
         ? { shop_name: form.shop_name.trim() }
         : activeTab === 'queue'
-        ? { daily_queue_limit: form.daily_queue_limit, booking_open_time: form.booking_open_time,
-            is_accepting_queue: form.is_accepting_queue, walkin_popup_duration_sec: form.walkin_popup_duration_sec }
-        : { notify_ahead_first: form.notify_ahead_first, notify_ahead_second: form.notify_ahead_second,
+          ? {
+            daily_queue_limit: form.daily_queue_limit, booking_open_time: form.booking_open_time,
+            is_accepting_queue: form.is_accepting_queue, walkin_popup_duration_sec: form.walkin_popup_duration_sec
+          }
+          : {
+            notify_ahead_first: form.notify_ahead_first, notify_ahead_second: form.notify_ahead_second,
             repeat_call_interval_sec: form.repeat_call_interval_sec, repeat_call_max_count: form.repeat_call_max_count,
-            barber_line_user_id: form.barber_line_user_id.trim() || null };
+            barber_line_user_id: form.barber_line_user_id.trim() || null
+          };
       const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -339,8 +343,7 @@ export default function SettingsPage() {
         setSelectedDates([]);
         setIsCustomMessageEdited(false);
         setSavedBanner(
-          `บันทึกวันหยุด ${selectedDates.length} วันเรียบร้อยแล้ว${
-            data.broadcastSent ? ' พร้อมส่งบรอดแคสต์ LINE สำเร็จ' : ''
+          `บันทึกวันหยุด ${selectedDates.length} วันเรียบร้อยแล้ว${data.broadcastSent ? ' พร้อมส่งบรอดแคสต์ LINE สำเร็จ' : ''
           }`
         );
         fetchSettingsAndHolidays();
@@ -392,8 +395,7 @@ export default function SettingsPage() {
       if (res.ok) {
         setShowReopenDialog(false);
         setSavedBanner(
-          `เปิดร้านให้บริการตามปกติแล้ว${
-            data.broadcastSent ? ' พร้อมส่ง LINE บรอดแคสต์บอกลูกค้าแล้ว' : ''
+          `เปิดร้านให้บริการตามปกติแล้ว${data.broadcastSent ? ' พร้อมส่ง LINE บรอดแคสต์บอกลูกค้าแล้ว' : ''
           }`
         );
         fetchSettingsAndHolidays();
@@ -427,8 +429,7 @@ export default function SettingsPage() {
       if (res.ok) {
         setShowQuickCloseDialog(false);
         setSavedBanner(
-          `ตั้งค่าปิดร้านวันนี้แล้ว${
-            data.broadcastSent ? ' พร้อมส่ง LINE บรอดแคสต์แจ้งลูกค้าแล้ว' : ''
+          `ตั้งค่าปิดร้านวันนี้แล้ว${data.broadcastSent ? ' พร้อมส่ง LINE บรอดแคสต์แจ้งลูกค้าแล้ว' : ''
           }`
         );
         fetchSettingsAndHolidays();
@@ -525,8 +526,8 @@ export default function SettingsPage() {
       <div className="grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
         <nav aria-label="หมวดการตั้งค่า" className="flex gap-2 overflow-x-auto pb-1 md:flex-col md:overflow-visible">
           {([
-            ['shop', 'ร้านค้า'], ['queue', 'คิวและการจอง'],
-            ['notify', 'แจ้งเตือน'], ['holiday', 'วันหยุดและ LINE'],
+            ['shop', 'เกี่ยยกับร้านค้า'], ['queue', 'คิวและการจอง'],
+            ['notify', 'การแจ้งเตือน'], ['holiday', 'เลือกวันหยุด'],
           ] as const).map(([id, label]) => (
             <button key={id} type="button" onClick={() => setActiveTab(id)}
               aria-current={activeTab === id ? 'page' : undefined}
@@ -536,432 +537,431 @@ export default function SettingsPage() {
           ))}
         </nav>
         <div className="min-w-0 space-y-4">
-      {savedBanner && (
-        <div
-          role="status"
-          aria-live="polite"
-          className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-xs sm:text-sm font-bold text-white shadow-sm"
-        >
-          <CheckCircle2 className="h-4 w-4 shrink-0" />
-          <span>{savedBanner}</span>
-        </div>
-      )}
-
-      {errorBanner && (
-        <div
-          role="alert"
-          className="flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-3 text-xs sm:text-sm font-bold text-white shadow-sm"
-        >
-          <AlertCircle className="h-4 w-4 shrink-0" />
-          <span>{errorBanner}</span>
-        </div>
-      )}
-
-      {/* โซนที่ 1: แผงควบคุมวันหยุด & สถานะร้าน (ออกแบบใหม่: ปุ่มหยุดวันนี้เด่นชัด + ปฏิทินหน้าเดียว) */}
-      {activeTab === 'holiday' && <section className="rounded-2xl border border-slate-200 bg-white p-3.5 sm:p-5 shadow-sm space-y-3.5">
-        <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-          <div className="flex items-center gap-2">
-            <span
-              className={`flex h-3 w-3 rounded-full ${
-                isShopClosedToday ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'
-              }`}
-            />
-            <h1 className="text-sm sm:text-base font-extrabold text-slate-900">
-              สถานะร้านวันนี้: {isShopClosedToday ? '🔴 ปิดร้าน (วันหยุด)' : '🟢 เปิดให้บริการตามปกติ'}
-            </h1>
-          </div>
-          <span className="font-mono text-xs font-bold text-slate-500">
-            {formatThaiDateShort(getTodayStr())}
-          </span>
-        </div>
-
-        {/* ปุ่มเด่นสุด: ถ้าเปิดอยู่ โชว์ "หยุดงานวันนี้ (ปิดร้านด่วน)" ปุ่มใหญ่สีแดงกดง่ายสุด / ถ้าปิดอยู่ โชว์ "เปิดร้านวันนี้" สีเขียว */}
-        {!isShopClosedToday ? (
-          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-            {/* ปุ่มหยุดงานวันนี้ (เด่นชัด ปุ่มใหญ่สะดุดตา) */}
-            <button
-              type="button"
-              onClick={() => setShowQuickCloseDialog(true)}
-              className="sm:col-span-7 flex min-h-[58px] items-center justify-center gap-2.5 rounded-2xl bg-rose-600 px-4 py-3 text-white shadow-md transition-transform hover:bg-rose-500 active:scale-[0.98]"
+          {savedBanner && (
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex items-center gap-2 rounded-xl bg-emerald-600 px-4 py-3 text-xs sm:text-sm font-bold text-white shadow-sm"
             >
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20">
-                <DoorClosed className="h-5 w-5 stroke-[2.5]" />
-              </div>
-              <div className="text-left">
-                <div className="text-sm sm:text-base font-extrabold leading-tight">
-                  หยุดงานวันนี้
-                </div>
-                <div className="text-[11px] text-rose-100 font-medium">
-                  กดเพื่อปิดรับคิว LINE ทันที & ส่งแจ้งลูกค้า
-                </div>
-              </div>
-            </button>
-
-            {/* ปุ่มเปิดปฏิทินกำหนดวันหยุดล่วงหน้า */}
-            <button
-              type="button"
-              onClick={() => {
-                setShowCalendarModal(true);
-                setIsCustomMessageEdited(false);
-              }}
-              className="sm:col-span-5 flex min-h-[58px] items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-slate-900 px-3.5 py-3 text-white shadow-sm hover:bg-slate-800 transition-colors"
-            >
-              <CalendarIcon className="h-4 w-4 shrink-0 text-emerald-400" />
-              <div className="text-left">
-                <div className="text-xs sm:text-sm font-bold leading-tight">
-                  ปฏิทินวันหยุด
-                </div>
-                <div className="text-[10px] text-slate-300">
-                  กำหนดวันหยุด & บรอดแคสต์
-                </div>
-              </div>
-            </button>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
-            {/* ปุ่มเปลี่ยนใจเปิดร้านวันนี้ (เด่นชัด ปุ่มใหญ่สีเขียว) */}
-            <button
-              type="button"
-              onClick={() => setShowReopenDialog(true)}
-              className="sm:col-span-7 flex min-h-[58px] items-center justify-center gap-2.5 rounded-2xl bg-emerald-600 px-4 py-3 text-white shadow-md transition-transform hover:bg-emerald-500 active:scale-[0.98]"
-            >
-              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20">
-                <DoorOpen className="h-5 w-5 stroke-[2.5]" />
-              </div>
-              <div className="text-left">
-                <div className="text-sm sm:text-base font-extrabold leading-tight">
-                  เปิดร้านวันนี้ (ยกเลิกวันหยุด)
-                </div>
-                <div className="text-[11px] text-emerald-100 font-medium">
-                  กลับมารับคิวตามปกติ & ส่ง LINE บอกลูกค้า
-                </div>
-              </div>
-            </button>
-
-            {/* ปุ่มเปิดปฏิทินกำหนดวันหยุด */}
-            <button
-              type="button"
-              onClick={() => {
-                setShowCalendarModal(true);
-                setIsCustomMessageEdited(false);
-              }}
-              className="sm:col-span-5 flex min-h-[58px] items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-3.5 py-3 text-slate-800 shadow-sm hover:bg-slate-50 transition-colors"
-            >
-              <CalendarIcon className="h-4 w-4 shrink-0 text-slate-600" />
-              <div className="text-left">
-                <div className="text-xs sm:text-sm font-bold leading-tight text-slate-900">
-                  ปฏิทินวันหยุด
-                </div>
-                <div className="text-[10px] text-slate-500">
-                  กำหนดวันหยุด & บรอดแคสต์
-                </div>
-              </div>
-            </button>
-          </div>
-        )}
-
-        {/* แถบสรุปสถานะรายละเอียด */}
-        <div className="rounded-xl bg-slate-50 p-2.5 text-xs text-slate-600 flex items-center justify-between gap-2">
-          <span>
-            {isShopClosedToday
-              ? `ขณะนี้ระบบปฏิเสธการจองคิว LINE (${shopClosedReason || 'วันหยุดประจำร้าน'})`
-              : 'ขณะนี้ระบบเปิดให้ลูกค้าจองคิวผ่าน LINE และหน้าร้านได้ตามปกติ'}
-          </span>
-          <span className="font-bold text-slate-700 shrink-0">
-            วันหยุดในระบบ: {holidays.length} วัน
-          </span>
-        </div>
-
-        {/* รายการวันหยุดที่ตั้งไว้แล้ว */}
-        {holidays.length > 0 && (
-          <div className="pt-2 border-t border-slate-100">
-            <span className="text-[11px] font-bold text-slate-500 mb-1.5 block">
-              วันหยุดที่กำหนดไว้ล่วงหน้า (แตะเพื่อลบออกได้):
-            </span>
-            <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
-              {holidays.map((h) => (
-                <span
-                  key={h.id}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-2xs"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
-                  <span className="font-mono font-bold text-slate-900">
-                    {formatThaiDateShort(h.holiday_date)}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteHoliday(h.holiday_date)}
-                    title={`ลบวันหยุด ${h.holiday_date}`}
-                    className="ml-0.5 rounded p-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </span>
-              ))}
-            </div>
-          </div>
-        )}
-      </section>}
-
-      {/* โซนที่ 2: ตั้งค่าการแจ้งเตือนคิวทั่วไป */}
-      {activeTab !== 'holiday' && <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-sm">
-        <div className="border-b border-slate-100 pb-3">
-          <h2 className="text-base sm:text-lg font-bold text-slate-900">
-            {activeTab === 'shop' ? 'ข้อมูลร้าน' : activeTab === 'queue' ? 'คิวและการจอง' : 'แจ้งเตือนคิว'}
-          </h2>
-          {activeTab === 'notify' && <p className="text-xs text-slate-500">
-            กำหนดระยะคิวแจ้งเตือนผ่าน LINE และการเรียกคิวซ้ำอัตโนมัติ
-          </p>}
-        </div>
-
-        <form onSubmit={handleSaveSettings} className="mt-4 space-y-4">
-          {activeTab === 'shop' && <div>
-            <label
-              htmlFor="shop_name"
-              className="block text-xs sm:text-sm font-bold text-slate-800"
-            >
-              ชื่อร้านตัดผม
-            </label>
-            <input
-              id="shop_name"
-              type="text"
-              value={form.shop_name}
-              onChange={(e) =>
-                setForm((prev) => ({ ...prev, shop_name: e.target.value }))
-              }
-              className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm font-semibold text-slate-900 focus:border-emerald-600"
-            />
-          </div>}
-
-          {activeTab === 'queue' && <div className="grid gap-4 sm:grid-cols-2">
-            <label className="block text-sm font-bold text-slate-800">คิวสูงสุดต่อวัน
-              <input type="number" min={1} max={999} placeholder="ไม่จำกัด"
-                value={form.daily_queue_limit ?? ''}
-                onChange={(e) => setForm((prev) => ({ ...prev, daily_queue_limit: e.target.value === '' ? null : Number(e.target.value) }))}
-                className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
-            </label>
-            <label className="block text-sm font-bold text-slate-800">เวลาเปิดรับจอง
-              <input type="time" value={form.booking_open_time}
-                onChange={(e) => setForm((prev) => ({ ...prev, booking_open_time: e.target.value }))}
-                className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
-            </label>
-            <label className="flex min-h-11 items-center gap-3 text-sm font-bold text-slate-800 sm:col-span-2">
-              <input type="checkbox" checked={form.is_accepting_queue}
-                onChange={(e) => setForm((prev) => ({ ...prev, is_accepting_queue: e.target.checked }))}
-                className="h-5 w-5 accent-emerald-700" /> รับคิวใหม่
-            </label>
-            <label className="block text-sm font-bold text-slate-800 sm:col-span-2">เวลาแสดงคิวหน้าร้านล่าสุด (วินาที)
-              <input type="number" min={3} max={30} value={form.walkin_popup_duration_sec}
-                onChange={(e) => setForm((prev) => ({ ...prev, walkin_popup_duration_sec: Number(e.target.value) }))}
-                className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
-            </label>
-          </div>}
-
-          {activeTab === 'notify' && <><div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <label
-                htmlFor="notify_ahead_first"
-                className="block text-xs sm:text-sm font-bold text-slate-800"
-              >
-                เตือนล่วงหน้าครั้งที่ 1 (เหลือกี่คิว)
-              </label>
-              <input
-                id="notify_ahead_first"
-                type="number"
-                min={2}
-                max={20}
-                value={form.notify_ahead_first}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    notify_ahead_first: Number(e.target.value),
-                  }))
-                }
-                className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="notify_ahead_second"
-                className="block text-xs sm:text-sm font-bold text-slate-800"
-              >
-                เตือนใกล้ถึงคิวครั้งที่ 2 (เหลือกี่คิว)
-              </label>
-              <input
-                id="notify_ahead_second"
-                type="number"
-                min={1}
-                max={10}
-                value={form.notify_ahead_second}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    notify_ahead_second: Number(e.target.value),
-                  }))
-                }
-                className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div>
-              <label
-                htmlFor="repeat_call_interval_sec"
-                className="block text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1"
-              >
-                <Clock className="h-3.5 w-3.5 text-emerald-600" />
-                <span>ระยะเวลาเรียกซ้ำ (วินาที)</span>
-              </label>
-              <input
-                id="repeat_call_interval_sec"
-                type="number"
-                min={10}
-                max={600}
-                value={form.repeat_call_interval_sec}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    repeat_call_interval_sec: Number(e.target.value),
-                  }))
-                }
-                className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
-              />
-            </div>
-
-            <div>
-              <label
-                htmlFor="repeat_call_max_count"
-                className="block text-xs sm:text-sm font-bold text-slate-800"
-              >
-                จำนวนครั้งเรียกซ้ำสูงสุด
-              </label>
-              <input
-                id="repeat_call_max_count"
-                type="number"
-                min={1}
-                max={10}
-                value={form.repeat_call_max_count}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    repeat_call_max_count: Number(e.target.value),
-                  }))
-                }
-                className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
-              />
-            </div>
-          </div>
-
-          {/* แจ้งเตือนช่างผ่าน LINE */}
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3.5 space-y-2.5">
-            <div className="flex items-center gap-2">
-              <MessageCircle className="h-4 w-4 text-emerald-700 shrink-0" />
-              <span className="text-xs sm:text-sm font-bold text-emerald-900">
-                แจ้งเตือนช่างผ่าน LINE (ไม่บังคับ)
-              </span>
-            </div>
-            <p className="text-xs text-emerald-800 leading-relaxed">
-              เมื่อลูกค้าจองคิว LINE ระบบจะส่งข้อความแจ้งเตือนไปยังบัญชี LINE ส่วนตัวของช่างทันที
-              ช่างต้องเพิ่มเพื่อน LINE OA ของร้านก่อนถึงจะรับข้อความได้
-            </p>
-            <div>
-              <label
-                htmlFor="barber_line_user_id"
-                className="block text-xs font-bold text-emerald-900 mb-1.5"
-              >
-                LINE User ID ของช่าง
-              </label>
-              <div className="relative">
-                <input
-                  id="barber_line_user_id"
-                  type={showBarberUserId ? 'text' : 'password'}
-                  value={form.barber_line_user_id}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      barber_line_user_id: e.target.value,
-                    }))
-                  }
-                  placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                  className="w-full rounded-xl border border-emerald-300 bg-white px-3.5 py-2.5 pr-10 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowBarberUserId((v) => !v)}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
-                  aria-label={showBarberUserId ? 'ซ่อน User ID' : 'แสดง User ID'}
-                >
-                  {showBarberUserId ? (
-                    <EyeOff className="h-4 w-4" />
-                  ) : (
-                    <Eye className="h-4 w-4" />
-                  )}
-                </button>
-              </div>
-              <p className="mt-1.5 text-[11px] text-emerald-700">
-                💡 วิธีหา LINE User ID: ให้ช่างเปิดแชท LINE OA ของร้าน แล้วพิมพ์คำว่า{' '}
-                <strong className="underline font-bold">myid</strong> ส่งไป บอทจะตอบกลับรหัส User ID ทันที
-                สามารถคัดลอกมาวางในช่องนี้ได้เลย
-              </p>
-            </div>
-          </div>
-
-          </>}
-          <div className="pt-2">
-            <button
-              type="submit"
-              disabled={saving}
-              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
-            >
-              <Save className="h-4 w-4" />
-              <span>{saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}</span>
-            </button>
-          </div>
-        </form>
-      </section>}
-
-      {/* รีเซ็ตคิวเริ่มวันใหม่ */}
-      {activeTab === 'holiday' && <section className="rounded-2xl border border-rose-200 bg-rose-50/60 p-4 sm:p-5">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <h2 className="text-sm font-bold text-rose-900 flex items-center gap-1.5">
-              <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
-              <span>รีเซ็ตคิวทั้งหมดของวันนี้</span>
-            </h2>
-            <p className="mt-0.5 text-xs text-rose-700">
-              ล้างคิวเพื่อเริ่มนับ 001 ใหม่สำหรับวันถัดไป
-            </p>
-          </div>
-
-          {!confirmReset ? (
-            <button
-              onClick={() => setConfirmReset(true)}
-              className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-300 bg-white px-3.5 py-2.5 text-xs font-bold text-rose-700 hover:bg-rose-100 shrink-0"
-            >
-              <RotateCcw className="h-3.5 w-3.5" />
-              <span>รีเซ็ตคิววันนี้</span>
-            </button>
-          ) : (
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleResetQueues}
-                disabled={resetting}
-                className="flex-1 sm:flex-initial rounded-xl bg-rose-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-rose-700"
-              >
-                ยืนยันล้างคิว
-              </button>
-              <button
-                onClick={() => setConfirmReset(false)}
-                className="rounded-xl bg-white px-3 py-2.5 text-xs font-semibold text-slate-600 border border-slate-200"
-              >
-                ยกเลิก
-              </button>
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <span>{savedBanner}</span>
             </div>
           )}
-        </div>
-      </section>}
+
+          {errorBanner && (
+            <div
+              role="alert"
+              className="flex items-center gap-2 rounded-xl bg-rose-600 px-4 py-3 text-xs sm:text-sm font-bold text-white shadow-sm"
+            >
+              <AlertCircle className="h-4 w-4 shrink-0" />
+              <span>{errorBanner}</span>
+            </div>
+          )}
+
+          {/* โซนที่ 1: แผงควบคุมวันหยุด & สถานะร้าน (ออกแบบใหม่: ปุ่มหยุดวันนี้เด่นชัด + ปฏิทินหน้าเดียว) */}
+          {activeTab === 'holiday' && <section className="rounded-2xl border border-slate-200 bg-white p-3.5 sm:p-5 shadow-sm space-y-3.5">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+              <div className="flex items-center gap-2">
+                <span
+                  className={`flex h-3 w-3 rounded-full ${isShopClosedToday ? 'bg-rose-500 animate-pulse' : 'bg-emerald-500'
+                    }`}
+                />
+                <h1 className="text-sm sm:text-base font-extrabold text-slate-900">
+                  สถานะร้านวันนี้: {isShopClosedToday ? 'หยุดร้าน 1 วัน' : 'เปิดให้บริการตามปกติ'}
+                </h1>
+              </div>
+              <span className="font-mono text-xs font-bold text-slate-500">
+                {formatThaiDateShort(getTodayStr())}
+              </span>
+            </div>
+
+            {/* ปุ่มเด่นสุด: ถ้าเปิดอยู่ โชว์ "หยุดงานวันนี้ (ปิดร้านด่วน)" ปุ่มใหญ่สีแดงกดง่ายสุด / ถ้าปิดอยู่ โชว์ "เปิดร้านวันนี้" สีเขียว */}
+            {!isShopClosedToday ? (
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                {/* ปุ่มหยุดงานวันนี้ (เด่นชัด ปุ่มใหญ่สะดุดตา) */}
+                <button
+                  type="button"
+                  onClick={() => setShowQuickCloseDialog(true)}
+                  className="sm:col-span-7 flex min-h-[58px] items-center justify-center gap-2.5 rounded-2xl bg-rose-600 px-4 py-3 text-white shadow-md transition-transform hover:bg-rose-500 active:scale-[0.98]"
+                >
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20">
+                    <DoorClosed className="h-5 w-5 stroke-[2.5]" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-sm sm:text-base font-extrabold leading-tight">
+                      หยุดงานวันนี้
+                    </div>
+                    <div className="text-[11px] text-rose-100 font-medium">
+                      กดเพื่อปิดรับคิว LINE ทันที & ส่งแจ้งลูกค้า
+                    </div>
+                  </div>
+                </button>
+
+                {/* ปุ่มเปิดปฏิทินกำหนดวันหยุดล่วงหน้า */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCalendarModal(true);
+                    setIsCustomMessageEdited(false);
+                  }}
+                  className="sm:col-span-5 flex min-h-[58px] items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-slate-900 px-3.5 py-3 text-white shadow-sm hover:bg-slate-800 transition-colors"
+                >
+                  <CalendarIcon className="h-4 w-4 shrink-0 text-emerald-400" />
+                  <div className="text-left">
+                    <div className="text-xs sm:text-sm font-bold leading-tight">
+                      ปฏิทินวันหยุด
+                    </div>
+                    <div className="text-[10px] text-slate-300">
+                      กำหนดวันหยุด & บรอดแคสต์
+                    </div>
+                  </div>
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+                {/* ปุ่มเปลี่ยนใจเปิดร้านวันนี้ (เด่นชัด ปุ่มใหญ่สีเขียว) */}
+                <button
+                  type="button"
+                  onClick={() => setShowReopenDialog(true)}
+                  className="sm:col-span-7 flex min-h-[58px] items-center justify-center gap-2.5 rounded-2xl bg-emerald-600 px-4 py-3 text-white shadow-md transition-transform hover:bg-emerald-500 active:scale-[0.98]"
+                >
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/20">
+                    <DoorOpen className="h-5 w-5 stroke-[2.5]" />
+                  </div>
+                  <div className="text-left">
+                    <div className="text-sm sm:text-base font-extrabold leading-tight">
+                      เปิดร้านวันนี้ (ยกเลิกวันหยุด)
+                    </div>
+                    <div className="text-[11px] text-emerald-100 font-medium">
+                      กลับมารับคิวตามปกติ & ส่ง LINE บอกลูกค้า
+                    </div>
+                  </div>
+                </button>
+
+                {/* ปุ่มเปิดปฏิทินกำหนดวันหยุด */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCalendarModal(true);
+                    setIsCustomMessageEdited(false);
+                  }}
+                  className="sm:col-span-5 flex min-h-[58px] items-center justify-center gap-2 rounded-2xl border border-slate-300 bg-white px-3.5 py-3 text-slate-800 shadow-sm hover:bg-slate-50 transition-colors"
+                >
+                  <CalendarIcon className="h-4 w-4 shrink-0 text-slate-600" />
+                  <div className="text-left">
+                    <div className="text-xs sm:text-sm font-bold leading-tight text-slate-900">
+                      ปฏิทินวันหยุด
+                    </div>
+                    <div className="text-[10px] text-slate-500">
+                      กำหนดวันหยุด & บรอดแคสต์
+                    </div>
+                  </div>
+                </button>
+              </div>
+            )}
+
+            {/* แถบสรุปสถานะรายละเอียด */}
+            <div className="rounded-xl bg-slate-50 p-2.5 text-xs text-slate-600 flex items-center justify-between gap-2">
+              <span>
+                {isShopClosedToday
+                  ? `ขณะนี้ระบบปฏิเสธการจองคิว LINE (${shopClosedReason || 'วันหยุดประจำร้าน'})`
+                  : 'ขณะนี้ระบบเปิดให้ลูกค้าจองคิวผ่าน LINE และหน้าร้านได้ตามปกติ'}
+              </span>
+              <span className="font-bold text-slate-700 shrink-0">
+                วันหยุดในระบบ: {holidays.length} วัน
+              </span>
+            </div>
+
+            {/* รายการวันหยุดที่ตั้งไว้แล้ว */}
+            {holidays.length > 0 && (
+              <div className="pt-2 border-t border-slate-100">
+                <span className="text-[11px] font-bold text-slate-500 mb-1.5 block">
+                  วันหยุดที่กำหนดไว้ล่วงหน้า (แตะเพื่อลบออกได้):
+                </span>
+                <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
+                  {holidays.map((h) => (
+                    <span
+                      key={h.id}
+                      className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-semibold text-slate-700 shadow-2xs"
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />
+                      <span className="font-mono font-bold text-slate-900">
+                        {formatThaiDateShort(h.holiday_date)}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteHoliday(h.holiday_date)}
+                        title={`ลบวันหยุด ${h.holiday_date}`}
+                        className="ml-0.5 rounded p-0.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </section>}
+
+          {/* โซนที่ 2: ตั้งค่าการแจ้งเตือนคิวทั่วไป */}
+          {activeTab !== 'holiday' && <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-sm">
+            <div className="border-b border-slate-100 pb-3">
+              <h2 className="text-base sm:text-lg font-bold text-slate-900">
+                {activeTab === 'shop' ? 'ข้อมูลร้าน' : activeTab === 'queue' ? 'คิวและการจอง' : 'แจ้งเตือนคิว'}
+              </h2>
+              {activeTab === 'notify' && <p className="text-xs text-slate-500">
+                กำหนดระยะคิวแจ้งเตือนผ่าน LINE และการเรียกคิวซ้ำอัตโนมัติ
+              </p>}
+            </div>
+
+            <form onSubmit={handleSaveSettings} className="mt-4 space-y-4">
+              {activeTab === 'shop' && <div>
+                <label
+                  htmlFor="shop_name"
+                  className="block text-xs sm:text-sm font-bold text-slate-800"
+                >
+                  ชื่อร้านตัดผม
+                </label>
+                <input
+                  id="shop_name"
+                  type="text"
+                  value={form.shop_name}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, shop_name: e.target.value }))
+                  }
+                  className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm font-semibold text-slate-900 focus:border-emerald-600"
+                />
+              </div>}
+
+              {activeTab === 'queue' && <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block text-sm font-bold text-slate-800">คิวสูงสุดต่อวัน
+                  <input type="number" min={1} max={999} placeholder="ไม่จำกัด"
+                    value={form.daily_queue_limit ?? ''}
+                    onChange={(e) => setForm((prev) => ({ ...prev, daily_queue_limit: e.target.value === '' ? null : Number(e.target.value) }))}
+                    className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
+                </label>
+                <label className="block text-sm font-bold text-slate-800">เวลาเปิดรับจอง
+                  <input type="time" value={form.booking_open_time}
+                    onChange={(e) => setForm((prev) => ({ ...prev, booking_open_time: e.target.value }))}
+                    className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
+                </label>
+                <label className="flex min-h-11 items-center gap-3 text-sm font-bold text-slate-800 sm:col-span-2">
+                  <input type="checkbox" checked={form.is_accepting_queue}
+                    onChange={(e) => setForm((prev) => ({ ...prev, is_accepting_queue: e.target.checked }))}
+                    className="h-5 w-5 accent-emerald-700" /> รับคิวใหม่
+                </label>
+                <label className="block text-sm font-bold text-slate-800 sm:col-span-2">เวลาแสดงคิวหน้าร้านล่าสุด (วินาที)
+                  <input type="number" min={3} max={30} value={form.walkin_popup_duration_sec}
+                    onChange={(e) => setForm((prev) => ({ ...prev, walkin_popup_duration_sec: Number(e.target.value) }))}
+                    className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
+                </label>
+              </div>}
+
+              {activeTab === 'notify' && <><div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label
+                    htmlFor="notify_ahead_first"
+                    className="block text-xs sm:text-sm font-bold text-slate-800"
+                  >
+                    เตือนล่วงหน้าครั้งที่ 1 (เหลือกี่คิว)
+                  </label>
+                  <input
+                    id="notify_ahead_first"
+                    type="number"
+                    min={2}
+                    max={20}
+                    value={form.notify_ahead_first}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        notify_ahead_first: Number(e.target.value),
+                      }))
+                    }
+                    className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="notify_ahead_second"
+                    className="block text-xs sm:text-sm font-bold text-slate-800"
+                  >
+                    เตือนใกล้ถึงคิวครั้งที่ 2 (เหลือกี่คิว)
+                  </label>
+                  <input
+                    id="notify_ahead_second"
+                    type="number"
+                    min={1}
+                    max={10}
+                    value={form.notify_ahead_second}
+                    onChange={(e) =>
+                      setForm((prev) => ({
+                        ...prev,
+                        notify_ahead_second: Number(e.target.value),
+                      }))
+                    }
+                    className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
+                  />
+                </div>
+              </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <label
+                      htmlFor="repeat_call_interval_sec"
+                      className="block text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1"
+                    >
+                      <Clock className="h-3.5 w-3.5 text-emerald-600" />
+                      <span>ระยะเวลาเรียกซ้ำ (วินาที)</span>
+                    </label>
+                    <input
+                      id="repeat_call_interval_sec"
+                      type="number"
+                      min={10}
+                      max={600}
+                      value={form.repeat_call_interval_sec}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          repeat_call_interval_sec: Number(e.target.value),
+                        }))
+                      }
+                      className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
+                    />
+                  </div>
+
+                  <div>
+                    <label
+                      htmlFor="repeat_call_max_count"
+                      className="block text-xs sm:text-sm font-bold text-slate-800"
+                    >
+                      จำนวนครั้งเรียกซ้ำสูงสุด
+                    </label>
+                    <input
+                      id="repeat_call_max_count"
+                      type="number"
+                      min={1}
+                      max={10}
+                      value={form.repeat_call_max_count}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          repeat_call_max_count: Number(e.target.value),
+                        }))
+                      }
+                      className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
+                    />
+                  </div>
+                </div>
+
+                {/* แจ้งเตือนช่างผ่าน LINE */}
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3.5 space-y-2.5">
+                  <div className="flex items-center gap-2">
+                    <MessageCircle className="h-4 w-4 text-emerald-700 shrink-0" />
+                    <span className="text-xs sm:text-sm font-bold text-emerald-900">
+                      แจ้งเตือนช่างผ่าน LINE (ไม่บังคับ)
+                    </span>
+                  </div>
+                  <p className="text-xs text-emerald-800 leading-relaxed">
+                    เมื่อลูกค้าจองคิว LINE ระบบจะส่งข้อความแจ้งเตือนไปยังบัญชี LINE ส่วนตัวของช่างทันที
+                    ช่างต้องเพิ่มเพื่อน LINE OA ของร้านก่อนถึงจะรับข้อความได้
+                  </p>
+                  <div>
+                    <label
+                      htmlFor="barber_line_user_id"
+                      className="block text-xs font-bold text-emerald-900 mb-1.5"
+                    >
+                      LINE User ID ของช่าง
+                    </label>
+                    <div className="relative">
+                      <input
+                        id="barber_line_user_id"
+                        type={showBarberUserId ? 'text' : 'password'}
+                        value={form.barber_line_user_id}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            barber_line_user_id: e.target.value,
+                          }))
+                        }
+                        placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                        className="w-full rounded-xl border border-emerald-300 bg-white px-3.5 py-2.5 pr-10 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowBarberUserId((v) => !v)}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
+                        aria-label={showBarberUserId ? 'ซ่อน User ID' : 'แสดง User ID'}
+                      >
+                        {showBarberUserId ? (
+                          <EyeOff className="h-4 w-4" />
+                        ) : (
+                          <Eye className="h-4 w-4" />
+                        )}
+                      </button>
+                    </div>
+                    <p className="mt-1.5 text-[11px] text-emerald-700">
+                      💡 วิธีหา LINE User ID: ให้ช่างเปิดแชท LINE OA ของร้าน แล้วพิมพ์คำว่า{' '}
+                      <strong className="underline font-bold">myid</strong> ส่งไป บอทจะตอบกลับรหัส User ID ทันที
+                      สามารถคัดลอกมาวางในช่องนี้ได้เลย
+                    </p>
+                  </div>
+                </div>
+
+              </>}
+              <div className="pt-2">
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-600 px-5 py-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
+                >
+                  <Save className="h-4 w-4" />
+                  <span>{saving ? 'กำลังบันทึก...' : 'บันทึกการตั้งค่า'}</span>
+                </button>
+              </div>
+            </form>
+          </section>}
+
+          {/* รีเซ็ตคิวเริ่มวันใหม่ */}
+          {activeTab === 'holiday' && <section className="rounded-2xl border border-rose-200 bg-rose-50/60 p-4 sm:p-5">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h2 className="text-sm font-bold text-rose-900 flex items-center gap-1.5">
+                  <AlertTriangle className="h-4 w-4 text-rose-600 shrink-0" />
+                  <span>รีเซ็ตคิวทั้งหมดของวันนี้</span>
+                </h2>
+                <p className="mt-0.5 text-xs text-rose-700">
+                  ล้างคิวเพื่อเริ่มนับ 001 ใหม่สำหรับวันถัดไป
+                </p>
+              </div>
+
+              {!confirmReset ? (
+                <button
+                  onClick={() => setConfirmReset(true)}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-rose-300 bg-white px-3.5 py-2.5 text-xs font-bold text-rose-700 hover:bg-rose-100 shrink-0"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  <span>รีเซ็ตคิววันนี้</span>
+                </button>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleResetQueues}
+                    disabled={resetting}
+                    className="flex-1 sm:flex-initial rounded-xl bg-rose-600 px-3.5 py-2.5 text-xs font-bold text-white hover:bg-rose-700"
+                  >
+                    ยืนยันล้างคิว
+                  </button>
+                  <button
+                    onClick={() => setConfirmReset(false)}
+                    className="rounded-xl bg-white px-3 py-2.5 text-xs font-semibold text-slate-600 border border-slate-200"
+                  >
+                    ยกเลิก
+                  </button>
+                </div>
+              )}
+            </div>
+          </section>}
         </div>
       </div>
 
@@ -1070,9 +1070,8 @@ export default function SettingsPage() {
                 {['อา', 'จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส'].map((d, i) => (
                   <span
                     key={i}
-                    className={`py-1 font-bold text-[11px] ${
-                      i === 0 || i === 6 ? 'text-rose-500' : 'text-slate-500'
-                    }`}
+                    className={`py-1 font-bold text-[11px] ${i === 0 || i === 6 ? 'text-rose-500' : 'text-slate-500'
+                      }`}
                   >
                     {d}
                   </span>
@@ -1092,15 +1091,14 @@ export default function SettingsPage() {
                       key={i}
                       type="button"
                       onClick={() => toggleDateSelection(d)}
-                      className={`relative flex min-h-[38px] flex-col items-center justify-center rounded-xl font-mono text-xs font-bold transition-all ${
-                        isSelected
+                      className={`relative flex min-h-[38px] flex-col items-center justify-center rounded-xl font-mono text-xs font-bold transition-all ${isSelected
                           ? 'bg-rose-600 text-white shadow-sm scale-[0.98]'
                           : isAlreadySaved
-                          ? 'bg-rose-50 border border-rose-300 text-rose-900 hover:bg-rose-100'
-                          : isToday
-                          ? 'bg-emerald-50 border border-emerald-400 text-emerald-950 font-black'
-                          : 'bg-white border border-slate-200 text-slate-800 hover:bg-slate-100'
-                      }`}
+                            ? 'bg-rose-50 border border-rose-300 text-rose-900 hover:bg-rose-100'
+                            : isToday
+                              ? 'bg-emerald-50 border border-emerald-400 text-emerald-950 font-black'
+                              : 'bg-white border border-slate-200 text-slate-800 hover:bg-slate-100'
+                        }`}
                     >
                       <span>{d}</span>
                       {/* จุดบอกสถานะวันหยุดเดิมที่บันทึกไว้ในระบบแล้ว */}
@@ -1144,8 +1142,8 @@ export default function SettingsPage() {
                     {topology.type === 'single'
                       ? 'หยุดวันเดียว'
                       : topology.type === 'range'
-                      ? `ช่วงวันต่อเนื่อง (${selectedDates.length} วัน)`
-                      : `หลายวันในเดือน (${selectedDates.length} วัน)`}
+                        ? `ช่วงวันต่อเนื่อง (${selectedDates.length} วัน)`
+                        : `หลายวันในเดือน (${selectedDates.length} วัน)`}
                   </span>
                 )}
               </div>
