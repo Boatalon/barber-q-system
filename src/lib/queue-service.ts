@@ -62,11 +62,14 @@ export interface SystemQueueState {
     callCount: number;
     maxCount: number;
   };
+  isAcceptingQueue: boolean;
+  dailyQueueCount: number;
+  dailyQueueLimit: number | null;
 }
 
 export async function getSettings(): Promise<ShopSettings> {
   const supabase = getSupabase();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('shop_settings')
     .select('*')
     .eq('id', 1)
@@ -75,6 +78,7 @@ export async function getSettings(): Promise<ShopSettings> {
   if (data) {
     return data as ShopSettings;
   }
+  if (error && error.code !== 'PGRST116') throw error;
 
   const fallback: ShopSettings = {
     id: 1,
@@ -90,9 +94,13 @@ export async function getSettings(): Promise<ShopSettings> {
     last_walkin_display_code: null,
     last_walkin_created_at: null,
     updated_at: new Date().toISOString(),
+    daily_queue_limit: null,
+    is_accepting_queue: true,
+    booking_open_time: '08:30',
   };
 
-  await supabase.from('shop_settings').upsert(fallback);
+  const { error: insertError } = await supabase.from('shop_settings').upsert(fallback);
+  if (insertError) throw insertError;
   return fallback;
 }
 
@@ -109,57 +117,64 @@ export async function updateSettings(
       | 'barber_line_user_id'
       | 'is_shop_closed'
       | 'force_open_date'
+      | 'daily_queue_limit'
+      | 'is_accepting_queue'
+      | 'booking_open_time'
     >
   >
 ): Promise<ShopSettings> {
   const supabase = getSupabase();
-  const current = await getSettings();
-
   const next: Partial<ShopSettings> & { updated_at: string } = {
-    shop_name: input.shop_name?.trim() || current.shop_name,
-    notify_ahead_first:
-      typeof input.notify_ahead_first === 'number'
-        ? Math.max(1, Math.min(20, Math.floor(input.notify_ahead_first)))
-        : current.notify_ahead_first,
-    notify_ahead_second:
-      typeof input.notify_ahead_second === 'number'
-        ? Math.max(1, Math.min(10, Math.floor(input.notify_ahead_second)))
-        : current.notify_ahead_second,
-    repeat_call_interval_sec:
-      typeof input.repeat_call_interval_sec === 'number'
-        ? Math.max(10, Math.min(600, Math.floor(input.repeat_call_interval_sec)))
-        : current.repeat_call_interval_sec,
-    repeat_call_max_count:
-      typeof input.repeat_call_max_count === 'number'
-        ? Math.max(1, Math.min(10, Math.floor(input.repeat_call_max_count)))
-        : current.repeat_call_max_count,
-    walkin_popup_duration_sec:
-      typeof input.walkin_popup_duration_sec === 'number'
-        ? Math.max(3, Math.min(30, Math.floor(input.walkin_popup_duration_sec)))
-        : current.walkin_popup_duration_sec,
-    barber_line_user_id:
-      'barber_line_user_id' in input
-        ? (input.barber_line_user_id?.trim() || null)
-        : current.barber_line_user_id,
-    is_shop_closed:
-      typeof input.is_shop_closed === 'boolean'
-        ? input.is_shop_closed
-        : current.is_shop_closed,
-    force_open_date:
-      'force_open_date' in input
-        ? (input.force_open_date?.trim() || null)
-        : current.force_open_date,
+    ...(input.shop_name?.trim() ? { shop_name: input.shop_name.trim() } : {}),
+    ...(Number.isFinite(input.notify_ahead_first) ? { notify_ahead_first: Math.max(1, Math.min(20, Math.floor(input.notify_ahead_first!))) } : {}),
+    ...(Number.isFinite(input.notify_ahead_second) ? { notify_ahead_second: Math.max(1, Math.min(10, Math.floor(input.notify_ahead_second!))) } : {}),
+    ...(Number.isFinite(input.repeat_call_interval_sec) ? { repeat_call_interval_sec: Math.max(10, Math.min(600, Math.floor(input.repeat_call_interval_sec!))) } : {}),
+    ...(Number.isFinite(input.repeat_call_max_count) ? { repeat_call_max_count: Math.max(1, Math.min(10, Math.floor(input.repeat_call_max_count!))) } : {}),
+    ...(Number.isFinite(input.walkin_popup_duration_sec) ? { walkin_popup_duration_sec: Math.max(3, Math.min(30, Math.floor(input.walkin_popup_duration_sec!))) } : {}),
+    ...('barber_line_user_id' in input ? { barber_line_user_id: input.barber_line_user_id?.trim() || null } : {}),
+    ...(typeof input.is_shop_closed === 'boolean' ? { is_shop_closed: input.is_shop_closed } : {}),
+    ...('force_open_date' in input ? { force_open_date: input.force_open_date?.trim() || null } : {}),
+    ...(input.daily_queue_limit !== undefined ? { daily_queue_limit: input.daily_queue_limit === null ? null : Math.max(1, Math.min(999, Math.floor(input.daily_queue_limit))) } : {}),
+    ...(typeof input.is_accepting_queue === 'boolean' ? { is_accepting_queue: input.is_accepting_queue } : {}),
+    ...(typeof input.booking_open_time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(input.booking_open_time) ? { booking_open_time: input.booking_open_time } : {}),
     updated_at: new Date().toISOString(),
   };
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('shop_settings')
     .update(next)
     .eq('id', 1)
     .select('*')
     .single();
+  if (error) throw error;
+  return data as ShopSettings;
+}
 
-  return (data as ShopSettings) ?? { ...current, ...next };
+/**
+ * ตรวจสอบว่าเวลาปัจจุบัน (ICT/UTC+7) ยังอยู่ก่อนเวลาเปิดรับจอง
+ */
+export function isBeforeBookingOpenTime(openTime: string): boolean {
+  const bangkokMs = Date.now() + 7 * 60 * 60 * 1000;
+  const d = new Date(bangkokMs);
+  const h = d.getUTCHours();
+  const m = d.getUTCMinutes();
+  const [oh, om] = openTime.split(':').map(Number);
+  if (!Number.isInteger(oh) || !Number.isInteger(om)) return false;
+  return h < oh || (h === oh && m < om);
+}
+
+/**
+ * นับจำนวนคิวในวันนี้ที่ไม่ใช่ CANCELLED (WAITING + SERVING + COMPLETED)
+ */
+export async function getTodayQueueCount(today: string): Promise<number> {
+  const supabase = getSupabase();
+  const { count, error } = await supabase
+    .from('queues')
+    .select('id', { count: 'exact', head: true })
+    .eq('queue_date', today)
+    .in('status', ['WAITING', 'SERVING', 'COMPLETED']);
+  if (error) throw error;
+  return count ?? 0;
 }
 
 /**
@@ -566,32 +581,51 @@ export async function addWalkInQueue(): Promise<{
 }> {
   const supabase = getSupabase();
   const today = getTodayDateString();
+
+  const settings = await getSettings();
+
+  // Check is_accepting_queue
+  if (!settings.is_accepting_queue) {
+    throw new Error('QUEUE_NOT_ACCEPTING');
+  }
+  // Check booking_open_time
+  if (isBeforeBookingOpenTime(settings.booking_open_time)) {
+    throw new Error('BOOKING_NOT_OPEN_YET:' + settings.booking_open_time);
+  }
+  // Check daily_queue_limit
+  if (settings.daily_queue_limit !== null) {
+    const count = await getTodayQueueCount(today);
+    if (count >= settings.daily_queue_limit) {
+      throw new Error('DAILY_LIMIT_REACHED:' + settings.daily_queue_limit);
+    }
+  }
+
   const nextNum = await getNextQueueNumber(today);
   const displayCode = formatQueueCode(nextNum);
   const nowIso = new Date().toISOString();
 
-  const [{ data: inserted }] = await Promise.all([
-    supabase
-      .from('queues')
-      .insert({
+  const { data: inserted, error: insertError } = await supabase
+    .from('queues')
+    .insert({
         queue_date: today,
         queue_number: nextNum,
         display_code: displayCode,
         source: 'WALK_IN',
         status: 'WAITING',
         created_at: nowIso,
-      })
-      .select('*')
-      .single(),
-    supabase
+    })
+    .select('*')
+    .single();
+  if (insertError) throw new Error(insertError.message);
+  const issuedCode = (inserted as QueueRow).display_code;
+  await supabase
       .from('shop_settings')
       .update({
-        last_walkin_display_code: displayCode,
+        last_walkin_display_code: issuedCode,
         last_walkin_created_at: nowIso,
         updated_at: nowIso,
       })
-      .eq('id', 1),
-  ]);
+      .eq('id', 1);
 
   const { waiting } = await getActiveQueuesWithPosition(today);
   const createdItem =
@@ -635,11 +669,22 @@ export async function bookLineQueue(
     };
   }
 
+  if (!settings.is_accepting_queue) throw new Error('QUEUE_NOT_ACCEPTING');
+  if (isBeforeBookingOpenTime(settings.booking_open_time)) {
+    throw new Error('BOOKING_NOT_OPEN_YET:' + settings.booking_open_time);
+  }
+  if (settings.daily_queue_limit !== null) {
+    const count = await getTodayQueueCount(today);
+    if (count >= settings.daily_queue_limit) {
+      throw new Error('DAILY_LIMIT_REACHED:' + settings.daily_queue_limit);
+    }
+  }
+
   const nextNum = await getNextQueueNumber(today);
   const displayCode = formatQueueCode(nextNum);
   const nowIso = new Date().toISOString();
 
-  const { data: inserted } = await supabase
+  const { data: inserted, error: insertError } = await supabase
     .from('queues')
     .insert({
       queue_date: today,
@@ -653,6 +698,7 @@ export async function bookLineQueue(
     })
     .select('*')
     .single();
+  if (insertError) throw new Error(insertError.message);
 
   const updated = await getActiveQueuesWithPosition(today);
   const newQueue =
@@ -1288,5 +1334,8 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
     isShopClosedToday,
     shopClosedReason,
     repeatStatus,
+    isAcceptingQueue: settings.is_accepting_queue ?? true,
+    dailyQueueLimit: settings.daily_queue_limit ?? null,
+    dailyQueueCount: settings.daily_queue_limit === null ? 0 : await getTodayQueueCount(today),
   };
 }

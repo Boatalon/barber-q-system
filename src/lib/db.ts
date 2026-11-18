@@ -35,6 +35,9 @@ export interface ShopSettings {
   last_walkin_display_code: string | null;
   last_walkin_created_at: string | null;
   updated_at: string;
+  daily_queue_limit: number | null;   // null = unlimited
+  is_accepting_queue: boolean;        // true = accepting new queues
+  booking_open_time: string;          // e.g. "08:30" (HH:mm, ICT)
 }
 
 export interface ShopHolidayRow {

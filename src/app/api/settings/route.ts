@@ -23,6 +23,13 @@ export async function GET() {
 export async function PUT(req: NextRequest) {
   try {
     const body = await req.json();
+    if ('daily_queue_limit' in body && body.daily_queue_limit !== null &&
+        (!Number.isInteger(Number(body.daily_queue_limit)) || Number(body.daily_queue_limit) < 1 || Number(body.daily_queue_limit) > 999)) {
+      return NextResponse.json({ error: 'จำนวนคิวสูงสุดต้องอยู่ระหว่าง 1 ถึง 999' }, { status: 400 });
+    }
+    if (body.booking_open_time !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(body.booking_open_time)) {
+      return NextResponse.json({ error: 'เวลาเปิดรับจองไม่ถูกต้อง' }, { status: 400 });
+    }
     const settings = await updateSettings({
       shop_name: body.shop_name,
       notify_ahead_first:
@@ -45,8 +52,10 @@ export async function PUT(req: NextRequest) {
         body.walkin_popup_duration_sec !== undefined
           ? Number(body.walkin_popup_duration_sec)
           : undefined,
-      barber_line_user_id:
-        'barber_line_user_id' in body ? (body.barber_line_user_id ?? null) : undefined,
+      ...('barber_line_user_id' in body ? { barber_line_user_id: body.barber_line_user_id ?? null } : {}),
+      daily_queue_limit: 'daily_queue_limit' in body ? (body.daily_queue_limit === null ? null : Number(body.daily_queue_limit)) : undefined,
+      is_accepting_queue: typeof body.is_accepting_queue === 'boolean' ? body.is_accepting_queue : undefined,
+      booking_open_time: body.booking_open_time,
     });
     const state = await getSystemQueueState();
     return NextResponse.json({

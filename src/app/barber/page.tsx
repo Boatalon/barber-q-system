@@ -18,8 +18,10 @@ import {
   ChevronDown,
   AlertCircle,
   Trash2,
+  PauseCircle,
+  PlayCircle,
 } from 'lucide-react';
-import type { EnrichedQueueItem, SystemQueueState } from '@/lib/queue-service';
+import type { SystemQueueState } from '@/lib/queue-service';
 import {
   announceQueueCall,
   announceQueueSkipped,
@@ -36,6 +38,8 @@ export default function BarberControlPage() {
   const [nextCooldown, setNextCooldown] = useState(0);
   const [confirmCancelId, setConfirmCancelId] = useState<number | null>(null);
   const [showSkipServingModal, setShowSkipServingModal] = useState(false);
+  const [showStopAcceptingModal, setShowStopAcceptingModal] = useState(false);
+  const [loadingToggle, setLoadingToggle] = useState(false);
   const [toastMessage, setToastMessage] = useState<{
     text: string;
     type: 'success' | 'info' | 'warning' | 'error';
@@ -92,67 +96,15 @@ export default function BarberControlPage() {
 
   const handleAddWalkIn = async () => {
     if (loadingAction) return;
-    const previousState = state;
-    const predictedNum = (Number(state?.lastIssuedCode || 0) || 0) + 1;
-    const predictedCode = String(predictedNum).padStart(3, '0');
-
     setLoadingAction('walkin');
     isMutatingRef.current = true;
-
-    if (soundEnabled) {
-      announceWalkInAdded(predictedCode);
-    }
-
-    if (state) {
-      const nowIso = new Date().toISOString();
-      const optimisticQueue: EnrichedQueueItem = {
-        id: -Date.now(),
-        queue_date: state.todayDate,
-        queue_number: predictedNum,
-        display_code: predictedCode,
-        source: 'WALK_IN',
-        line_user_id: null,
-        customer_label: `ลูกค้าหน้าร้าน #${predictedCode}`,
-        status: 'WAITING',
-        notified_near_1: false,
-        notified_near_2: false,
-        call_count: 0,
-        last_called_at: null,
-        created_at: nowIso,
-        served_at: null,
-        closed_at: null,
-        queuesAhead: state.waitingQueues.length + (state.currentServing ? 1 : 0),
-        notifiedNear1: false,
-        notifiedNear2: false,
-      };
-      const nextWaiting = [...state.waitingQueues, optimisticQueue];
-      setState({
-        ...state,
-        lastIssuedCode: predictedCode,
-        totalWaiting: nextWaiting.length,
-        waitingQueues: nextWaiting,
-        walkInWaitingQueues: [...state.walkInWaitingQueues, optimisticQueue],
-        walkInPopup: {
-          active: true,
-          displayCode: predictedCode,
-          waitingCount: nextWaiting.length,
-          createdAt: nowIso,
-          expiresAtMs:
-            Date.now() + state.settings.walkin_popup_duration_sec * 1000,
-        },
-      });
-    }
 
     try {
       const res = await fetch('/api/queue/walk-in', { method: 'POST' });
       const data = await res.json();
       if (res.ok && data.state) {
         setState(data.state);
-        if (
-          soundEnabled &&
-          data.issuedQueue?.display_code &&
-          data.issuedQueue.display_code !== predictedCode
-        ) {
+        if (soundEnabled && data.issuedQueue?.display_code) {
           announceWalkInAdded(data.issuedQueue.display_code);
         }
         showToast(
@@ -160,11 +112,9 @@ export default function BarberControlPage() {
           'success'
         );
       } else {
-        if (previousState) setState(previousState);
         showToast(data.error || 'ไม่สามารถเพิ่มคิวหน้าร้านได้', 'error');
       }
     } catch {
-      if (previousState) setState(previousState);
       showToast('การเชื่อมต่อขัดข้อง ไม่สามารถเพิ่มคิวได้', 'error');
     } finally {
       isMutatingRef.current = false;
@@ -378,6 +328,36 @@ export default function BarberControlPage() {
     }
   };
 
+  const handleToggleAccepting = async () => {
+    if (loadingToggle) return;
+    setLoadingToggle(true);
+    setShowStopAcceptingModal(false);
+    isMutatingRef.current = true;
+    try {
+      const res = await fetch('/api/queue/toggle-accepting', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isAcceptingQueue: !isAcceptingQueue }),
+      });
+      const data = await res.json();
+      if (res.ok && data.state) {
+        setState(data.state);
+        showToast(
+          data.isAcceptingQueue
+            ? 'เปิดรับคิวใหม่แล้ว ✅'
+            : 'หยุดรับคิวใหม่แล้ว — ลูกค้า LINE ไม่สามารถจองได้ชั่วคราว 🔴',
+          data.isAcceptingQueue ? 'success' : 'warning'
+        );
+      } else {
+        showToast(data.error || 'ไม่สามารถเปลี่ยนสถานะได้', 'error');
+      }
+    } catch {
+      showToast('การเชื่อมต่อขัดข้อง', 'error');
+    } finally {
+      isMutatingRef.current = false;
+      setLoadingToggle(false);
+    }
+  };
+
   const currentServing = state?.currentServing ?? null;
   const currentServingCode = currentServing?.display_code ?? '---';
   const totalWaiting = state?.totalWaiting ?? 0;
@@ -387,6 +367,9 @@ export default function BarberControlPage() {
     state?.walkInWaitingQueues[state.walkInWaitingQueues.length - 1]
       ?.display_code ??
     '---';
+  const isAcceptingQueue = state?.isAcceptingQueue ?? true;
+  const dailyQueueCount = state?.dailyQueueCount ?? 0;
+  const dailyQueueLimit = state?.dailyQueueLimit ?? null;
 
   return (
     <div className="barber-page mx-auto w-full max-w-6xl px-4 pt-5 space-y-4 md:px-6 md:pt-8">
@@ -430,6 +413,25 @@ export default function BarberControlPage() {
         </div>
       )}
 
+      {/* แบนเนอร์แจ้งเตือนเมื่อหยุดรับคิวชั่วคราว */}
+      {!isAcceptingQueue && (
+        <div
+          role="alert"
+          className="flex items-center justify-between gap-2 rounded-xl border border-orange-200 bg-orange-50 px-3.5 py-2.5 text-xs font-bold text-orange-900"
+        >
+          <div className="flex items-center gap-2">
+            <PauseCircle className="h-4 w-4 text-orange-600 shrink-0" />
+            <span>ขณะนี้ <strong>หยุดรับคิวใหม่</strong> ทั้ง LINE และหน้าร้าน</span>
+          </div>
+          <button
+            onClick={() => setShowStopAcceptingModal(true)}
+            className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-700 shrink-0"
+          >
+            เปิดรับใหม่
+          </button>
+        </div>
+      )}
+
       {/* แถบแจ้งผลการกดปุ่ม */}
       {toastMessage && (
         <div
@@ -457,12 +459,28 @@ export default function BarberControlPage() {
 
       {/* โซนที่ 1: สถานะคิวปัจจุบัน + จำนวนคิวรอ + ปุ่มเรียกซ้ำ (รวมอยู่ในกรอบเดียวสำหรับหน้าจอแนวตั้ง) */}
       <section className="barber-status rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:p-6">
-        <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5 mb-3">
-          <h1 className="flex items-center gap-2 text-sm font-bold text-slate-800">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5 mb-3">
+          <h1 className="flex min-w-0 items-center gap-2 text-sm font-bold text-slate-800">
             <img src="/signature-logo.png" alt="" className="h-9 w-9 rounded-md object-contain" />
             <span>ซิกเนเจอร์ · คิววันนี้</span>
           </h1>
-          <div className="flex items-center gap-1.5">
+          {/* ปุ่มหยุด/เปิดรับคิว */}
+          <button
+            onClick={() => isAcceptingQueue ? setShowStopAcceptingModal(true) : handleToggleAccepting()}
+            disabled={loadingToggle}
+            className={`inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition-colors disabled:opacity-50 ${
+              isAcceptingQueue
+                ? 'border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100'
+                : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+            }`}
+          >
+            {isAcceptingQueue ? (
+              <><PauseCircle className="h-3.5 w-3.5" /><span>หยุดรับคิว</span></>
+            ) : (
+              <><PlayCircle className="h-3.5 w-3.5" /><span>เปิดรับคิว</span></>
+            )}
+          </button>
+          <div className="flex w-full items-center justify-end gap-1.5 sm:w-auto">
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
@@ -634,6 +652,12 @@ export default function BarberControlPage() {
       </section>
 
       {/* โซนที่ 2: ปุ่มกดหลัก 2 ปุ่ม (ออกแบบให้กดด้วยนิ้วโป้งบนจอมือถือแนวตั้งได้ถนัดมือ + กันกดข้ามคิวเบิ้ล) */}
+      {dailyQueueLimit !== null && (
+        <div className="rounded-xl bg-white px-4 py-3 text-sm font-semibold text-slate-700" aria-label={`ออกคิววันนี้ ${dailyQueueCount} จาก ${dailyQueueLimit} คิว`}>
+          <div className="mb-2 flex justify-between"><span>ออกคิววันนี้</span><strong>{dailyQueueCount} / {dailyQueueLimit} คิว</strong></div>
+          <div className="h-2 overflow-hidden rounded-full bg-slate-200"><div className="h-full rounded-full bg-emerald-600" style={{ width: `${Math.min(100, dailyQueueCount / dailyQueueLimit * 100)}%` }} /></div>
+        </div>
+      )}
       <section className="barber-actions grid grid-cols-2 gap-3" aria-label="จัดการคิว">
         <button
           onClick={handleAddWalkIn}
@@ -644,7 +668,7 @@ export default function BarberControlPage() {
             <Plus className="h-7 w-7 stroke-[2.75]" />
           </div>
           <span className="text-base sm:text-lg font-extrabold tracking-tight">
-            เพิ่มคิวหน้าร้าน
+            {loadingAction === 'walkin' ? 'กำลังเพิ่มคิว...' : 'เพิ่มคิวหน้าร้าน'}
           </span>
         </button>
 
@@ -843,6 +867,18 @@ export default function BarberControlPage() {
       </details>
 
       {/* Popup ยืนยันการยกเลิก/ข้ามคิวที่กำลังให้บริการ (ปุ่มยืนยันสีแดงอยู่ด้านซ้าย) */}
+      {showStopAcceptingModal && (
+        <div role="dialog" aria-modal="true" aria-labelledby="accepting-dialog-title" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
+          <div className="w-full max-w-sm space-y-4 rounded-2xl bg-white p-5 shadow-xl">
+            <h2 id="accepting-dialog-title" className="text-lg font-bold text-slate-900">{isAcceptingQueue ? 'หยุดรับคิวใหม่?' : 'เปิดรับคิวใหม่?'}</h2>
+            <p className="text-sm text-slate-700">{isAcceptingQueue ? 'ลูกค้าจะจองคิวใหม่ผ่าน LINE และหน้าร้านไม่ได้ แต่คิวที่มีอยู่ยังให้บริการต่อได้' : 'ลูกค้าจะจองคิวใหม่ได้อีกครั้ง'}</p>
+            <div className="grid grid-cols-2 gap-2">
+              <button onClick={() => setShowStopAcceptingModal(false)} className="min-h-11 rounded-xl border border-slate-300 font-bold">ยกเลิก</button>
+              <button onClick={handleToggleAccepting} disabled={loadingToggle} className="min-h-11 rounded-xl bg-rose-600 px-2 font-bold text-white disabled:opacity-50">{isAcceptingQueue ? 'ยืนยันหยุดรับ' : 'ยืนยันเปิดรับ'}</button>
+            </div>
+          </div>
+        </div>
+      )}
       {showSkipServingModal && currentServing && (
         <div
           role="dialog"

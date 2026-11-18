@@ -122,6 +122,7 @@ function analyzeDateTopology(dates: string[]): {
 }
 
 export default function SettingsPage() {
+  const [activeTab, setActiveTab] = useState<'shop' | 'queue' | 'notify' | 'holiday'>('queue');
   const [form, setForm] = useState({
     shop_name: 'ร้านตัดผม (Barber Queue)',
     notify_ahead_first: 3,
@@ -130,6 +131,9 @@ export default function SettingsPage() {
     repeat_call_max_count: 3,
     walkin_popup_duration_sec: 6,
     barber_line_user_id: '',
+    daily_queue_limit: null as number | null,
+    booking_open_time: '08:30',
+    is_accepting_queue: true,
   });
 
   const [showBarberUserId, setShowBarberUserId] = useState(false);
@@ -192,6 +196,9 @@ export default function SettingsPage() {
             repeat_call_max_count: sData.settings.repeat_call_max_count,
             walkin_popup_duration_sec: sData.settings.walkin_popup_duration_sec,
             barber_line_user_id: sData.settings.barber_line_user_id ?? '',
+            daily_queue_limit: sData.settings.daily_queue_limit ?? null,
+            booking_open_time: sData.settings.booking_open_time ?? '08:30',
+            is_accepting_queue: sData.settings.is_accepting_queue ?? true,
           });
         }
       }
@@ -271,7 +278,7 @@ export default function SettingsPage() {
     setSavedBanner(null);
     setErrorBanner(null);
 
-    if (form.notify_ahead_first <= form.notify_ahead_second) {
+    if (activeTab === 'notify' && form.notify_ahead_first <= form.notify_ahead_second) {
       setErrorBanner(
         'ระยะเตือนล่วงหน้าครั้งที่ 1 ต้องมีจำนวนคิวมากกว่าครั้งที่ 2 (เช่น 3 คิว และ 1 คิว)'
       );
@@ -280,19 +287,25 @@ export default function SettingsPage() {
 
     setSaving(true);
     try {
+      const payload = activeTab === 'shop'
+        ? { shop_name: form.shop_name.trim() }
+        : activeTab === 'queue'
+        ? { daily_queue_limit: form.daily_queue_limit, booking_open_time: form.booking_open_time,
+            is_accepting_queue: form.is_accepting_queue, walkin_popup_duration_sec: form.walkin_popup_duration_sec }
+        : { notify_ahead_first: form.notify_ahead_first, notify_ahead_second: form.notify_ahead_second,
+            repeat_call_interval_sec: form.repeat_call_interval_sec, repeat_call_max_count: form.repeat_call_max_count,
+            barber_line_user_id: form.barber_line_user_id.trim() || null };
       const res = await fetch('/api/settings', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...form,
-          barber_line_user_id: form.barber_line_user_id.trim() || null,
-        }),
+        body: JSON.stringify(payload),
       });
       if (res.ok) {
         setSavedBanner('บันทึกการตั้งค่าเรียบร้อยแล้ว');
         setTimeout(() => setSavedBanner(null), 4000);
       } else {
-        setErrorBanner('ไม่สามารถบันทึกการตั้งค่าได้');
+        const data = await res.json().catch(() => null);
+        setErrorBanner(data?.error || 'ไม่สามารถบันทึกการตั้งค่าได้');
       }
     } catch {
       setErrorBanner('การเชื่อมต่อขัดข้อง ไม่สามารถบันทึกการตั้งค่าได้');
@@ -507,7 +520,22 @@ export default function SettingsPage() {
   };
 
   return (
-    <div className="mx-auto max-w-xl px-3 py-3 sm:py-5 space-y-4">
+    <div className="mx-auto max-w-5xl px-4 py-5 sm:py-8 space-y-4">
+      <h1 className="text-xl font-bold text-slate-900">ตั้งค่าร้าน</h1>
+      <div className="grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
+        <nav aria-label="หมวดการตั้งค่า" className="flex gap-2 overflow-x-auto pb-1 md:flex-col md:overflow-visible">
+          {([
+            ['shop', 'ร้านค้า'], ['queue', 'คิวและการจอง'],
+            ['notify', 'แจ้งเตือน'], ['holiday', 'วันหยุดและ LINE'],
+          ] as const).map(([id, label]) => (
+            <button key={id} type="button" onClick={() => setActiveTab(id)}
+              aria-current={activeTab === id ? 'page' : undefined}
+              className={`min-h-11 shrink-0 rounded-xl px-4 text-left text-sm font-bold ${activeTab === id ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 hover:bg-slate-100'}`}>
+              {label}
+            </button>
+          ))}
+        </nav>
+        <div className="min-w-0 space-y-4">
       {savedBanner && (
         <div
           role="status"
@@ -530,7 +558,7 @@ export default function SettingsPage() {
       )}
 
       {/* โซนที่ 1: แผงควบคุมวันหยุด & สถานะร้าน (ออกแบบใหม่: ปุ่มหยุดวันนี้เด่นชัด + ปฏิทินหน้าเดียว) */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-3.5 sm:p-5 shadow-sm space-y-3.5">
+      {activeTab === 'holiday' && <section className="rounded-2xl border border-slate-200 bg-white p-3.5 sm:p-5 shadow-sm space-y-3.5">
         <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
           <div className="flex items-center gap-2">
             <span
@@ -673,21 +701,21 @@ export default function SettingsPage() {
             </div>
           </div>
         )}
-      </section>
+      </section>}
 
       {/* โซนที่ 2: ตั้งค่าการแจ้งเตือนคิวทั่วไป */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-sm">
+      {activeTab !== 'holiday' && <section className="rounded-2xl border border-slate-200 bg-white p-4 sm:p-6 shadow-sm">
         <div className="border-b border-slate-100 pb-3">
           <h2 className="text-base sm:text-lg font-bold text-slate-900">
-            ตั้งค่าการแจ้งเตือนคิว
+            {activeTab === 'shop' ? 'ข้อมูลร้าน' : activeTab === 'queue' ? 'คิวและการจอง' : 'แจ้งเตือนคิว'}
           </h2>
-          <p className="text-xs text-slate-500">
+          {activeTab === 'notify' && <p className="text-xs text-slate-500">
             กำหนดระยะคิวแจ้งเตือนผ่าน LINE และการเรียกคิวซ้ำอัตโนมัติ
-          </p>
+          </p>}
         </div>
 
         <form onSubmit={handleSaveSettings} className="mt-4 space-y-4">
-          <div>
+          {activeTab === 'shop' && <div>
             <label
               htmlFor="shop_name"
               className="block text-xs sm:text-sm font-bold text-slate-800"
@@ -703,9 +731,33 @@ export default function SettingsPage() {
               }
               className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-sm font-semibold text-slate-900 focus:border-emerald-600"
             />
-          </div>
+          </div>}
 
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          {activeTab === 'queue' && <div className="grid gap-4 sm:grid-cols-2">
+            <label className="block text-sm font-bold text-slate-800">คิวสูงสุดต่อวัน
+              <input type="number" min={1} max={999} placeholder="ไม่จำกัด"
+                value={form.daily_queue_limit ?? ''}
+                onChange={(e) => setForm((prev) => ({ ...prev, daily_queue_limit: e.target.value === '' ? null : Number(e.target.value) }))}
+                className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
+            </label>
+            <label className="block text-sm font-bold text-slate-800">เวลาเปิดรับจอง
+              <input type="time" value={form.booking_open_time}
+                onChange={(e) => setForm((prev) => ({ ...prev, booking_open_time: e.target.value }))}
+                className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
+            </label>
+            <label className="flex min-h-11 items-center gap-3 text-sm font-bold text-slate-800 sm:col-span-2">
+              <input type="checkbox" checked={form.is_accepting_queue}
+                onChange={(e) => setForm((prev) => ({ ...prev, is_accepting_queue: e.target.checked }))}
+                className="h-5 w-5 accent-emerald-700" /> รับคิวใหม่
+            </label>
+            <label className="block text-sm font-bold text-slate-800 sm:col-span-2">เวลาแสดงคิวหน้าร้านล่าสุด (วินาที)
+              <input type="number" min={3} max={30} value={form.walkin_popup_duration_sec}
+                onChange={(e) => setForm((prev) => ({ ...prev, walkin_popup_duration_sec: Number(e.target.value) }))}
+                className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
+            </label>
+          </div>}
+
+          {activeTab === 'notify' && <><div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
               <label
                 htmlFor="notify_ahead_first"
@@ -856,6 +908,7 @@ export default function SettingsPage() {
             </div>
           </div>
 
+          </>}
           <div className="pt-2">
             <button
               type="submit"
@@ -867,10 +920,10 @@ export default function SettingsPage() {
             </button>
           </div>
         </form>
-      </section>
+      </section>}
 
       {/* รีเซ็ตคิวเริ่มวันใหม่ */}
-      <section className="rounded-2xl border border-rose-200 bg-rose-50/60 p-4 sm:p-5">
+      {activeTab === 'holiday' && <section className="rounded-2xl border border-rose-200 bg-rose-50/60 p-4 sm:p-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
             <h2 className="text-sm font-bold text-rose-900 flex items-center gap-1.5">
@@ -908,7 +961,9 @@ export default function SettingsPage() {
             </div>
           )}
         </div>
-      </section>
+      </section>}
+        </div>
+      </div>
 
       {/* MODAL: ปฏิทินกำหนดวันหยุดหน้าเดียว (Single Smart Calendar - ไม่มีแท็บ จิ้มวันที่แล้วโค้ดคำนวณเงื่อนไขให้อัตโนมัติ) */}
       {showCalendarModal && (

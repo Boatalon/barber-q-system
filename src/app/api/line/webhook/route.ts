@@ -132,19 +132,27 @@ export async function POST(req: NextRequest) {
             text: `⛔ ขออภัยครับ วันนี้ทางร้านปิดให้บริการ (${closedInfo.reason || 'วันหยุด'})\n\nจึงยังไม่เปิดรับคิวในขณะนี้ สามารถติดตามวันเปิดทำการได้ทางไลน์นี้นะครับ 💈✂️`,
           });
         } else {
-          const booked = await bookLineQueue(userId);
-          replyMessages.push(
-            buildQueueFlexMessage({
-              shopName: settings.shop_name,
-              myQueueCode: booked.queue.display_code,
-              myStatus: booked.queue.status,
-              currentServingCode: booked.currentServingCode,
-              queuesAhead: booked.queue.queuesAhead,
-              headlineText: booked.isNew
-                ? '✅ รับคิวตัดผมสำเร็จ!'
-                : '📌 คุณมีหมายเลขคิวที่ใช้งานอยู่แล้ว',
-            })
-          );
+          try {
+            const booked = await bookLineQueue(userId);
+            replyMessages.push(
+              buildQueueFlexMessage({
+                shopName: settings.shop_name,
+                myQueueCode: booked.queue.display_code,
+                myStatus: booked.queue.status,
+                currentServingCode: booked.currentServingCode,
+                queuesAhead: booked.queue.queuesAhead,
+                headlineText: booked.isNew
+                  ? '✅ รับคิวตัดผมสำเร็จ!'
+                  : '📌 คุณมีหมายเลขคิวที่ใช้งานอยู่แล้ว',
+              })
+            );
+          } catch (error) {
+            const message = error instanceof Error ? error.message : '';
+            if (message === 'QUEUE_NOT_ACCEPTING') replyMessages.push({ type: 'text', text: 'ขณะนี้ร้านหยุดรับคิวใหม่ชั่วคราวครับ' });
+            else if (message.startsWith('BOOKING_NOT_OPEN_YET:')) replyMessages.push({ type: 'text', text: `เปิดรับจองเวลา ${message.split(':').slice(1).join(':')} น. ครับ` });
+            else if (message.startsWith('DAILY_LIMIT_REACHED:')) replyMessages.push({ type: 'text', text: `วันนี้คิวเต็มแล้ว (ครบ ${message.split(':')[1]} คิว) ขอบคุณที่สนใจร้าน ${settings.shop_name} ครับ` });
+            else throw error;
+          }
         }
       } else if (action === 'status') {
         const [statusInfo, closedInfo] = await Promise.all([
