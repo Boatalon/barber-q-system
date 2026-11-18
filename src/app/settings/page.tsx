@@ -159,7 +159,7 @@ export default function SettingsPage() {
     return { year: d.getFullYear(), month: d.getMonth() };
   });
   const [holidayReason, setHolidayReason] = useState('วันหยุดประจำร้าน');
-  const [shouldBroadcast, setShouldBroadcast] = useState(true);
+  const [shouldBroadcast, setShouldBroadcast] = useState(false);
   const [broadcastCustomMessage, setBroadcastCustomMessage] = useState('');
   const [isCustomMessageEdited, setIsCustomMessageEdited] = useState(false);
   const [submittingHoliday, setSubmittingHoliday] = useState(false);
@@ -170,7 +170,7 @@ export default function SettingsPage() {
   const [submittingReopen, setSubmittingReopen] = useState(false);
 
   // Quick close Dialog
-  const [quickCloseBroadcast, setQuickCloseBroadcast] = useState(true);
+  const [quickCloseBroadcast, setQuickCloseBroadcast] = useState(false);
   const [quickCloseMessage, setQuickCloseMessage] = useState('');
   const [submittingQuickClose, setSubmittingQuickClose] = useState(false);
 
@@ -593,7 +593,7 @@ export default function SettingsPage() {
                       หยุดงานวันนี้
                     </div>
                     <div className="text-[11px] text-rose-100 font-medium">
-                      กดเพื่อปิดรับคิว LINE ทันที & ส่งแจ้งลูกค้า
+                      ปิดรับคิวทันที · แจ้งวันหยุดเวลา 09:00 น.
                     </div>
                   </div>
                 </button>
@@ -1333,7 +1333,7 @@ export default function SettingsPage() {
                   ยืนยันหยุดงานวันนี้?
                 </h2>
                 <p className="mt-0.5 text-xs text-slate-600 leading-relaxed">
-                  ระบบจะปิดรับคิว LINE ทันที และแจ้งเตือนลูกค้าว่าวันนี้ร้านปิดทำการ
+                  ระบบจะปิดรับคิวทันที หากยังปิดอยู่ตอน 09:00 น. ระบบจะแจ้งลูกค้าทาง LINE
                 </p>
               </div>
             </div>
@@ -1347,7 +1347,7 @@ export default function SettingsPage() {
                   className="h-4 w-4 rounded text-rose-600"
                 />
                 <span className="text-xs font-bold text-rose-900">
-                  ส่งข้อความบรอดแคสต์แจ้งลูกค้าใน LINE ทันที
+                  ส่งประกาศเพิ่มเติมทาง LINE ทันที
                 </span>
               </label>
 

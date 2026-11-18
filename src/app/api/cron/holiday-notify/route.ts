@@ -1,11 +1,3 @@
-/**
- * GET /api/cron/holiday-notify
- *
- * เรียกโดย Vercel Cron ทุกวันเวลา 09:00 ICT (02:00 UTC)
- * ตรวจสอบว่าวันนี้เป็นวันหยุดที่ตั้งล่วงหน้าไว้หรือไม่
- * ถ้าใช่และยังไม่ได้แจ้งในวันนี้ (notified_on_day = false) → broadcast LINE แล้วอัปเดต flag เป็น true
- * ป้องกันการส่งซ้ำเมื่อช่างกดหยุดด่วน (closeShopToday จะตั้ง notified_on_day = true ไว้แล้ว)
- */
 import { NextResponse } from 'next/server';
 import { getSettings, formatShopDisplayName } from '@/lib/queue-service';
 import { getSupabase, getTodayDateString, type ShopHolidayRow } from '@/lib/db';
@@ -48,19 +40,32 @@ export async function GET() {
     const message =
       `📢 ประกาศจากร้าน ${shopName}\n` +
       `วันนี้ทางร้านหยุดให้บริการ 1 วัน (${reason}) นะครับ\n` +
-      `ขออภัยในความไม่สะดวก แล้วพบกันใหม่วันพรุ่งนี้ครับ 💈✂️`;
+      `ขออภัยในความไม่สะดวกครับ 💈✂️`;
 
-    const broadcastResult = await broadcastLineMessage(message);
-
-    // อัปเดต notified_on_day = true เพื่อไม่ให้ส่งซ้ำ
-    await supabase
+    // Claim the current record so concurrent cron requests cannot announce it twice.
+    const { data: claimed, error: claimError } = await supabase
       .from('shop_holidays')
       .update({ notified_on_day: true })
-      .eq('holiday_date', today);
+      .eq('id', holiday.id)
+      .eq('notified_on_day', false)
+      .select('id')
+      .maybeSingle();
+    if (claimError) throw claimError;
+    if (!claimed) return NextResponse.json({ skipped: true });
+
+    try {
+      const result = await broadcastLineMessage(message);
+      if (!result.success) throw new Error(result.error || 'LINE broadcast failed');
+    } catch (err) {
+      const { error } = await supabase.from('shop_holidays')
+        .update({ notified_on_day: false }).eq('id', holiday.id);
+      if (error) throw error;
+      throw err;
+    }
 
     return NextResponse.json({
       success: true,
-      broadcastSent: broadcastResult.success,
+      broadcastSent: true,
       holidayDate: today,
       reason,
     });
