@@ -220,11 +220,12 @@ export async function isShopClosedToday(): Promise<{
  */
 export async function getShopHolidays(): Promise<ShopHolidayRow[]> {
   const supabase = getSupabase();
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('shop_holidays')
     .select('*')
     .order('holiday_date', { ascending: true });
 
+  if (error) throw error;
   return (data as ShopHolidayRow[]) ?? [];
 }
 
@@ -245,9 +246,10 @@ export async function addShopHolidays(
     created_at: new Date().toISOString(),
   }));
 
-  await supabase
+  const { error } = await supabase
     .from('shop_holidays')
     .upsert(rows, { onConflict: 'holiday_date' });
+  if (error) throw error;
   return getShopHolidays();
 }
 
@@ -256,7 +258,8 @@ export async function addShopHolidays(
  */
 export async function removeShopHoliday(date: string): Promise<void> {
   const supabase = getSupabase();
-  await supabase.from('shop_holidays').delete().eq('holiday_date', date);
+  const { error } = await supabase.from('shop_holidays').delete().eq('holiday_date', date);
+  if (error) throw error;
 }
 
 /**
@@ -296,13 +299,8 @@ export async function closeShopToday(options?: {
   const today = getTodayDateString();
   const supabase = getSupabase();
 
-  await updateSettings({
-    is_shop_closed: true,
-    force_open_date: null,
-  });
-
   // บันทึกลง shop_holidays โดยตั้ง notified_on_day: true ทันที เพื่อป้องกันไม่ให้ระบบส่งข้อความซ้ำ
-  await supabase.from('shop_holidays').upsert(
+  const { error } = await supabase.from('shop_holidays').upsert(
     {
       holiday_date: today,
       reason: options?.reason || 'วันหยุดประจำร้าน',
@@ -311,6 +309,11 @@ export async function closeShopToday(options?: {
     },
     { onConflict: 'holiday_date' }
   );
+  if (error) throw error;
+  await updateSettings({
+    is_shop_closed: true,
+    force_open_date: null,
+  });
 
   let broadcastSent = false;
   if (options?.broadcast && options.broadcastMessage) {
@@ -365,8 +368,6 @@ export async function getActiveQueuesWithPosition(
 /**
  * ล้างข้อมูลคิวและประวัติแจ้งเตือนที่เก่าเกิน 3 วันออกจากฐานข้อมูลอัตโนมัติ
  */
-let lastAutoCleanupCheckDate: string | null = null;
-
 export async function cleanupOldQueueData(): Promise<{
   cutoffIso: string;
 }> {
@@ -1173,12 +1174,6 @@ export async function resetTodayQueues(): Promise<void> {
 export async function getSystemQueueState(): Promise<SystemQueueState> {
   const supabase = getSupabase();
   const today = getTodayDateString();
-
-  // ตรวจสอบและล้างข้อมูลคิวที่เก่าเกิน 3 วันอัตโนมัติในเบื้องหลัง (วันละ 1 ครั้ง)
-  if (lastAutoCleanupCheckDate !== today) {
-    lastAutoCleanupCheckDate = today;
-    void cleanupOldQueueData().catch(() => {});
-  }
 
   const [
     settings,
