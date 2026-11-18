@@ -5,27 +5,25 @@ import {
   getSettings,
   getShopHolidays,
   getSystemQueueState,
-  isShopClosedToday,
   openShopToday,
   removeShopHoliday,
 } from '@/lib/queue-service';
 
+import { getTodayDateString } from '@/lib/db';
+
 export const dynamic = 'force-dynamic';
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    const [holidays, closedInfo, settings] = await Promise.all([
-      getShopHolidays(),
-      isShopClosedToday(),
-      getSettings(),
-    ]);
-
+    const holidays = await getShopHolidays();
+    const today = getTodayDateString();
+    const holiday = holidays.find((row) => row.holiday_date === today);
     return NextResponse.json({
       success: true,
       holidays,
-      isShopClosedToday: closedInfo.isClosed,
-      shopClosedReason: closedInfo.reason,
-      settings,
+      isShopClosedToday: Boolean(holiday),
+      shopClosedReason: holiday?.reason ?? null,
+      ...(req.nextUrl.searchParams.get('view') === 'calendar' ? {} : { settings: await getSettings() }),
     });
   } catch (err) {
     console.error('[GET /api/settings/holidays Error]:', err);

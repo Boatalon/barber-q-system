@@ -145,7 +145,8 @@ export default function SettingsPage() {
   const [isShopClosedToday, setIsShopClosedToday] = useState(false);
   const [shopClosedReason, setShopClosedReason] = useState<string | null>(null);
   const [holidays, setHolidays] = useState<ShopHolidayRow[]>([]);
-  const [loadingHolidays, setLoadingHolidays] = useState(false);
+  const [loadingHolidays, setLoadingHolidays] = useState(true);
+  const [holidayLoadFailed, setHolidayLoadFailed] = useState(false);
 
   // Modals
   const [showCalendarModal, setShowCalendarModal] = useState(false);
@@ -177,14 +178,27 @@ export default function SettingsPage() {
   const [savedBanner, setSavedBanner] = useState<string | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
-  const fetchSettingsAndHolidays = useCallback(async () => {
+  const fetchHolidays = useCallback(async () => {
+    setLoadingHolidays(true);
+    setHolidayLoadFailed(false);
     try {
-      setLoadingHolidays(true);
-      const [settingsRes, holidaysRes] = await Promise.all([
-        fetch('/api/settings', { cache: 'no-store' }),
-        fetch('/api/settings/holidays', { cache: 'no-store' }),
-      ]);
+      const res = await fetch('/api/settings/holidays?view=calendar', { cache: 'no-store' });
+      if (!res.ok) throw new Error('Holiday request failed');
+      const data = await res.json();
+      if (!Array.isArray(data.holidays)) throw new Error('Invalid holiday list');
+      setIsShopClosedToday(Boolean(data.isShopClosedToday));
+      setShopClosedReason(data.shopClosedReason ?? null);
+      setHolidays(data.holidays);
+    } catch {
+      setHolidayLoadFailed(true);
+    } finally {
+      setLoadingHolidays(false);
+    }
+  }, []);
 
+  const fetchSettings = useCallback(async () => {
+    try {
+      const settingsRes = await fetch('/api/settings', { cache: 'no-store' });
       if (settingsRes.ok) {
         const sData: { settings?: ShopSettings } = await settingsRes.json();
         if (sData.settings) {
@@ -203,22 +217,15 @@ export default function SettingsPage() {
         }
       }
 
-      if (holidaysRes.ok) {
-        const hData = await holidaysRes.json();
-        setIsShopClosedToday(Boolean(hData.isShopClosedToday));
-        setShopClosedReason(hData.shopClosedReason ?? null);
-        setHolidays(hData.holidays ?? []);
-      }
     } catch {
-      setErrorBanner('ไม่สามารถโหลดข้อมูลการตั้งค่าและวันหยุดได้');
-    } finally {
-      setLoadingHolidays(false);
+      setErrorBanner('ไม่สามารถโหลดข้อมูลการตั้งค่าได้');
     }
   }, []);
 
+  useEffect(() => { void fetchSettings(); }, [fetchSettings]);
   useEffect(() => {
-    fetchSettingsAndHolidays();
-  }, [fetchSettingsAndHolidays]);
+    if (activeTab === 'holiday') void fetchHolidays();
+  }, [activeTab, fetchHolidays]);
 
   // วิเคราะห์เงื่อนไขของวันที่เลือกแบบเรียลไทม์
   const topology = useMemo(() => {
@@ -347,7 +354,7 @@ export default function SettingsPage() {
           `บันทึกวันหยุด ${selectedDates.length} วันเรียบร้อยแล้ว${data.broadcastSent ? ' พร้อมส่งบรอดแคสต์ LINE สำเร็จ' : ''
           }`
         );
-        fetchSettingsAndHolidays();
+        void fetchHolidays();
         setTimeout(() => setSavedBanner(null), 5000);
       } else {
         setErrorBanner(data.error || 'ไม่สามารถบันทึกวันหยุดได้');
@@ -368,7 +375,7 @@ export default function SettingsPage() {
       );
       if (res.ok) {
         setSavedBanner(`ยกเลิกวันหยุดวันที่ ${formatThaiDateShort(holidayDate)} แล้ว`);
-        fetchSettingsAndHolidays();
+        void fetchHolidays();
         setTimeout(() => setSavedBanner(null), 4000);
       } else {
         setErrorBanner('ไม่สามารถยกเลิกวันหยุดได้');
@@ -399,7 +406,7 @@ export default function SettingsPage() {
           `เปิดร้านให้บริการตามปกติแล้ว${data.broadcastSent ? ' พร้อมส่ง LINE บรอดแคสต์บอกลูกค้าแล้ว' : ''
           }`
         );
-        fetchSettingsAndHolidays();
+        void fetchHolidays();
         setTimeout(() => setSavedBanner(null), 5000);
       } else {
         setErrorBanner(data.error || 'ไม่สามารถเปิดร้านได้');
@@ -433,7 +440,7 @@ export default function SettingsPage() {
           `ตั้งค่าปิดร้านวันนี้แล้ว${data.broadcastSent ? ' พร้อมส่ง LINE บรอดแคสต์แจ้งลูกค้าแล้ว' : ''
           }`
         );
-        fetchSettingsAndHolidays();
+        void fetchHolidays();
         setTimeout(() => setSavedBanner(null), 5000);
       } else {
         setErrorBanner(data.error || 'ไม่สามารถปิดร้านได้');
@@ -560,7 +567,14 @@ export default function SettingsPage() {
           )}
 
           {/* โซนที่ 1: แผงควบคุมวันหยุด & สถานะร้าน (ออกแบบใหม่: ปุ่มหยุดวันนี้เด่นชัด + ปฏิทินหน้าเดียว) */}
-          {activeTab === 'holiday' && <section className="rounded-2xl border border-slate-200 bg-white p-3.5 sm:p-5 shadow-sm space-y-3.5">
+          {activeTab === 'holiday' && (loadingHolidays || holidayLoadFailed) && (
+            <div role="status" className="rounded-xl border bg-white p-4 text-sm">
+              {loadingHolidays ? 'กำลังโหลดวันหยุด…' : (
+                <>โหลดรายการวันหยุดไม่ได้ <button type="button" className="underline" onClick={fetchHolidays}>ลองอีกครั้ง</button></>
+              )}
+            </div>
+          )}
+          {activeTab === 'holiday' && !loadingHolidays && !holidayLoadFailed && <section className="rounded-2xl border border-slate-200 bg-white p-3.5 sm:p-5 shadow-sm space-y-3.5">
             <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
               <div className="flex items-center gap-2">
                 <span
