@@ -1,5 +1,7 @@
 'use client';
 
+import Image from 'next/image';
+
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Save,
@@ -144,7 +146,7 @@ export default function SettingsPage() {
   // สถานะวันหยุด & การเปิด-ปิดร้าน
   const [isShopClosedToday, setIsShopClosedToday] = useState(false);
   const [shopClosedReason, setShopClosedReason] = useState<string | null>(null);
-  const [holidays, setHolidays] = useState<ShopHolidayRow[]>([]);
+  const [holidays, setHolidays] = useState<Pick<ShopHolidayRow, 'holiday_date'>[]>([]);
   const [loadingHolidays, setLoadingHolidays] = useState(true);
   const [holidayLoadFailed, setHolidayLoadFailed] = useState(false);
 
@@ -530,7 +532,10 @@ export default function SettingsPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-5 sm:py-8 space-y-4">
-      <h1 className="text-xl font-bold text-slate-900">ตั้งค่าร้าน</h1>
+      <h1 className="flex items-center gap-3 text-xl font-bold text-slate-900">
+        <Image src="/signature-logo.png" alt="ซิกเนเจอร์" width={44} height={44} className="h-11 w-11 object-contain" />
+        ตั้งค่าร้าน
+      </h1>
       <div className="grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
         <nav aria-label="หมวดการตั้งค่า" className="flex gap-2 overflow-x-auto pb-1 md:flex-col md:overflow-visible">
           {([
@@ -696,7 +701,7 @@ export default function SettingsPage() {
                 <div className="flex flex-wrap gap-1.5 max-h-28 overflow-y-auto pr-1">
                   {holidays.map((h) => (
                     <span
-                      key={h.id}
+                      key={h.holiday_date}
                       className="inline-flex items-center gap-1.5 rounded-lg border border-pink-300 bg-pink-100 px-2.5 py-1 text-xs font-semibold text-pink-900 shadow-2xs"
                     >
                       <span className="h-1.5 w-1.5 rounded-full bg-rose-500 shrink-0" />

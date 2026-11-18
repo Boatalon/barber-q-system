@@ -9,21 +9,31 @@ import {
   removeShopHoliday,
 } from '@/lib/queue-service';
 
-import { getTodayDateString } from '@/lib/db';
+import { getSupabase, getTodayDateString } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    const holidays = await getShopHolidays();
     const today = getTodayDateString();
+    if (req.nextUrl.searchParams.get('view') === 'calendar') {
+      const { data, error } = await getSupabase().rpc('list_shop_holiday_dates');
+      if (error) throw error;
+      const holidays: { holiday_date: string }[] = data;
+      return NextResponse.json({
+        success: true,
+        holidays,
+        isShopClosedToday: holidays.some((row) => row.holiday_date === today),
+      });
+    }
+    const holidays = await getShopHolidays();
     const holiday = holidays.find((row) => row.holiday_date === today);
     return NextResponse.json({
       success: true,
       holidays,
       isShopClosedToday: Boolean(holiday),
       shopClosedReason: holiday?.reason ?? null,
-      ...(req.nextUrl.searchParams.get('view') === 'calendar' ? {} : { settings: await getSettings() }),
+      settings: await getSettings(),
     });
   } catch (err) {
     console.error('[GET /api/settings/holidays Error]:', err);

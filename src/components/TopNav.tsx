@@ -1,5 +1,7 @@
 'use client';
 
+import Image from 'next/image';
+
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
@@ -106,9 +108,7 @@ export default function TopNav() {
             onClick={() => setIsVisible(false)}
             className="flex items-center gap-2 shrink-0 text-slate-900"
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-600 text-white">
-              <Scissors className="h-4 w-4" />
-            </div>
+            <Image src="/signature-logo.png" alt="ซิกเนเจอร์" width={36} height={36} className="h-9 w-9 object-contain" />
             <span className="text-sm sm:text-base font-bold tracking-tight">
               คิวร้านตัดผม
             </span>

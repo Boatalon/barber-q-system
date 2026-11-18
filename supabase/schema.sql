@@ -75,3 +75,18 @@ create table if not exists public.shop_holidays (
 );
 create unique index if not exists shop_holidays_holiday_date_key
   on public.shop_holidays (holiday_date);
+
+create or replace function public.list_shop_holiday_dates()
+returns table (holiday_date date)
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select h.holiday_date
+  from public.shop_holidays as h
+  order by h.holiday_date;
+$$;
+
+revoke all on function public.list_shop_holiday_dates() from public;
+grant execute on function public.list_shop_holiday_dates() to anon, authenticated, service_role;
