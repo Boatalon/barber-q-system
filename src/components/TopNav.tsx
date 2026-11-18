@@ -7,6 +7,7 @@ import { Scissors, Monitor, Settings, ChevronDown } from 'lucide-react';
 
 export default function TopNav() {
   const pathname = usePathname();
+  const isDisplay = pathname === '/display';
   const [isVisible, setIsVisible] = useState(false);
   const hideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -61,6 +62,8 @@ export default function TopNav() {
       icon: Settings,
     },
   ];
+
+  if (isDisplay) return null;
 
   return (
     <>

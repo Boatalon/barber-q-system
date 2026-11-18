@@ -1,7 +1,9 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import {
+  ArrowLeft,
   Maximize2,
   Minimize2,
   Volume2,
@@ -92,55 +94,69 @@ export default function ShopDisplayPage() {
   const latestWalkInCode = state?.walkInPopup?.displayCode ?? '---';
 
   return (
-    <div className="min-h-screen bg-slate-950 text-white px-4 py-4 sm:p-8 flex flex-col justify-between">
+    <div className="shop-display bg-slate-950 text-white flex flex-col justify-between">
       {/* แถบหัวเรื่องจอหน้าร้าน */}
-      <div className="mx-auto w-full max-w-6xl flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
-        <div>
+      <div className="shop-display-header w-full flex items-center justify-between gap-3 border-b border-slate-800">
+        <div className="flex min-w-0 items-center gap-3">
+          <img src="/signature-logo.png" alt="ซิกเนเจอร์" className="h-10 w-10 rounded-lg bg-white object-contain p-0.5 sm:h-14 sm:w-14" />
+          <div className="min-w-0">
           <h1 className="text-base sm:text-xl font-bold text-white">
             {state?.settings.shop_name ?? 'จอแสดงคิวหน้าร้าน'}
           </h1>
-          <p className="text-xs text-slate-400">
-            อัปเดตหมายเลขคิวแบบเรียลไทม์
-          </p>
+          <p className="text-xs text-slate-400">คิวหน้าร้าน</p>
+          </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1 sm:gap-2">
           {state?.isShopClosedToday && (
             <span className="inline-flex items-center gap-1.5 rounded-xl border border-rose-500/50 bg-rose-900/60 px-3 py-1.5 text-xs font-bold text-rose-200">
               <span className="h-2 w-2 rounded-full bg-rose-500 animate-pulse" />
               <span>วันนี้ร้านปิดทำการ</span>
             </span>
           )}
+          <Link
+            href="/barber"
+            aria-label="กลับหน้าคุมคิว"
+            onClick={() => {
+              if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+            }}
+            className="inline-flex min-h-11 min-w-11 items-center justify-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-2 text-xs font-bold text-slate-200 hover:bg-slate-800 sm:px-3"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            <span className="hidden sm:inline">หน้าคุมคิว</span>
+          </Link>
           <button
             onClick={() => setSoundEnabled(!soundEnabled)}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-slate-800"
+            aria-label={soundEnabled ? 'ปิดเสียง' : 'เปิดเสียง'}
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-slate-800"
           >
             {soundEnabled ? (
               <>
                 <Volume2 className="h-3.5 w-3.5 text-emerald-400" />
-                <span>เสียงเปิด</span>
+                <span className="hidden sm:inline">เสียงเปิด</span>
               </>
             ) : (
               <>
                 <VolumeX className="h-3.5 w-3.5 text-slate-500" />
-                <span>ปิดเสียง</span>
+                <span className="hidden sm:inline">ปิดเสียง</span>
               </>
             )}
           </button>
 
           <button
             onClick={toggleFullscreen}
-            className="inline-flex items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-slate-800"
+            aria-label={isFullscreen ? 'ย่อจอ' : 'แสดงเต็มจอ'}
+            className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-slate-800"
           >
             {isFullscreen ? (
               <>
                 <Minimize2 className="h-3.5 w-3.5" />
-                <span>ย่อจอ</span>
+                <span className="hidden sm:inline">ย่อจอ</span>
               </>
             ) : (
               <>
                 <Maximize2 className="h-3.5 w-3.5" />
-                <span>เต็มจอ</span>
+                <span className="hidden sm:inline">เต็มจอ</span>
               </>
             )}
           </button>
@@ -148,17 +164,17 @@ export default function ShopDisplayPage() {
       </div>
 
       {/* พื้นที่แสดงผลหลัก (ไม่ใช้หน้าจอ Takeover เต็มจอ แสดงคิวปัจจุบัน + คิวรอ + คิวหน้าร้านล่าสุดพร้อมกัน) */}
-      <div className="mx-auto my-4 w-full max-w-6xl flex-1 flex flex-col justify-center">
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-12 items-stretch">
+      <div className="shop-display-main w-full flex-1 flex flex-col justify-center min-h-0">
+        <div className="shop-display-grid grid grid-cols-1 gap-4 lg:grid-cols-12 items-stretch">
           {/* คิวที่กำลังให้บริการปัจจุบัน */}
-          <div className="lg:col-span-7 flex flex-col items-center justify-center rounded-2xl border-2 border-slate-800 bg-slate-900/90 p-6 sm:p-10 text-center">
+          <div className="shop-display-current lg:col-span-7 flex flex-col items-center justify-center rounded-2xl border-2 border-slate-800 bg-slate-900/90 p-6 sm:p-10 text-center">
             <span className="text-xs sm:text-sm font-bold uppercase tracking-wider text-slate-400">
               คิวที่กำลังให้บริการ
             </span>
 
             <div
               aria-live="polite"
-              className="my-4 font-mono text-7xl sm:text-9xl leading-none font-black tracking-wider text-emerald-400 led-glow-green tabular-nums"
+              className="display-code my-4 font-mono leading-none font-black tracking-wider text-emerald-400 led-glow-green tabular-nums"
             >
               {currentCode}
             </div>
@@ -258,12 +274,6 @@ export default function ShopDisplayPage() {
       </div>
 
       {/* แถบสถานะล่างสุด */}
-      <div className="mx-auto w-full max-w-6xl flex items-center justify-between gap-2 border-t border-slate-900 pt-3 text-[11px] text-slate-500">
-        <span>เชื่อมต่อระบบคิวกลางออนไลน์</span>
-        <span className="tabular-nums">
-          คิวหน้าร้านล่าสุด: {latestWalkInCode}
-        </span>
-      </div>
     </div>
   );
 }

@@ -12,9 +12,62 @@
 }
 
 body {
-  @apply bg-slate-100 text-slate-900 antialiased;
+  @apply bg-slate-50 text-slate-900 antialiased;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans Thai", sans-serif;
   caret-color: #059669;
+}
+
+html, body { overflow-x: clip; }
+
+.barber-page { padding-bottom: calc(150px + env(safe-area-inset-bottom)); }
+.barber-status { position: relative; overflow: hidden; }
+.barber-status::before,
+.shop-display-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 4px;
+  background: repeating-linear-gradient(110deg, #db2030 0 18px, #fff 18px 31px, #224da3 31px 49px, #fff 49px 62px);
+}
+.barber-actions {
+  position: fixed;
+  z-index: 30;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  background: linear-gradient(to top, #f8fafc 84%, rgba(248,250,252,.92));
+  border-top: 1px solid #e2e8f0;
+}
+.shop-display {
+  width: 100%;
+  min-height: 100dvh;
+  height: 100dvh;
+  overflow: hidden;
+  padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) max(12px, env(safe-area-inset-bottom)) max(12px, env(safe-area-inset-left));
+}
+.shop-display-header { position: relative; padding-top: 12px; padding-bottom: 12px; }
+.shop-display-main { padding-block: 12px; }
+.shop-display-grid { height: 100%; min-height: 0; }
+.display-code { font-size: clamp(5rem, 20vmin, 18rem); }
+@media (min-width: 768px) {
+  .barber-page { padding-bottom: 40px; }
+  .barber-actions { position: static; max-width: 700px; margin-inline: auto; padding: 0; background: none; border: 0; }
+}
+@media (max-width: 1023px) {
+  .shop-display-grid { grid-template-rows: minmax(0, 1.4fr) minmax(0, 1fr); }
+  .shop-display-current { min-height: 0; }
+  .display-code { font-size: clamp(5rem, 25vmin, 13rem); }
+}
+@media (max-height: 650px) and (orientation: landscape) {
+  .shop-display-grid { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); }
+  .shop-display-current { grid-column: auto; }
+  .display-code { font-size: clamp(4rem, 22vh, 10rem); }
+}
+@media (max-height: 720px) {
+  .shop-display-main .shop-display-grid > div:last-child > div:last-child { display: none; }
 }
 
 .tabular-nums {

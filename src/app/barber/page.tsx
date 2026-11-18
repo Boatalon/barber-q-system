@@ -389,7 +389,7 @@ export default function BarberControlPage() {
     '---';
 
   return (
-    <div className="mx-auto max-w-xl px-3 py-3 sm:py-5 space-y-3.5">
+    <div className="barber-page mx-auto w-full max-w-6xl px-4 pt-5 space-y-4 md:px-6 md:pt-8">
       {/* แจ้งเตือนเมื่ออินเทอร์เน็ตหรือการเชื่อมต่อขัดข้อง */}
       {connectionError && (
         <div
@@ -398,7 +398,7 @@ export default function BarberControlPage() {
         >
           <div className="flex items-center gap-2">
             <AlertCircle className="h-4 w-4 shrink-0" />
-            <span>สัญญาณเชื่อมต่อเซิร์ฟเวอร์ขัดข้อง กำลังลองเชื่อมต่อใหม่...</span>
+            <span>เชื่อมต่อไม่ได้ กำลังลองใหม่</span>
           </div>
           <button
             onClick={fetchState}
@@ -456,10 +456,11 @@ export default function BarberControlPage() {
       )}
 
       {/* โซนที่ 1: สถานะคิวปัจจุบัน + จำนวนคิวรอ + ปุ่มเรียกซ้ำ (รวมอยู่ในกรอบเดียวสำหรับหน้าจอแนวตั้ง) */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <section className="barber-status rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:p-6">
         <div className="flex items-center justify-between gap-2 border-b border-slate-100 pb-2.5 mb-3">
-          <h1 className="text-sm font-bold text-slate-800">
-            สถานะคิวหน้าร้าน
+          <h1 className="flex items-center gap-2 text-sm font-bold text-slate-800">
+            <img src="/signature-logo.png" alt="" className="h-9 w-9 rounded-md object-contain" />
+            <span>ซิกเนเจอร์ · คิววันนี้</span>
           </h1>
           <div className="flex items-center gap-1.5">
             <button
@@ -529,7 +530,7 @@ export default function BarberControlPage() {
 
             <div
               aria-live="polite"
-              className="my-1 font-mono text-5xl sm:text-6xl font-black tracking-wider text-emerald-400 tabular-nums"
+              className="my-1 font-mono text-6xl sm:text-7xl font-black tracking-wider text-emerald-400 tabular-nums"
             >
               {currentServingCode}
             </div>
@@ -541,7 +542,7 @@ export default function BarberControlPage() {
                       state?.repeatStatus.maxCount ?? 3
                     } ครั้ง`
                   : 'ลูกค้าหน้าร้าน'
-                : 'ยังไม่มีคิวที่กำลังตัด'}
+                : 'ยังไม่มีคิวที่กำลังให้บริการ'}
             </div>
           </div>
 
@@ -549,7 +550,7 @@ export default function BarberControlPage() {
           <div className="col-span-5 flex flex-col gap-2">
             <div className="flex-1 flex flex-col justify-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
               <span className="text-[11px] font-semibold text-slate-500">
-                คิวรอทั้งหมด
+                คิวที่รอ
               </span>
               <div className="flex items-baseline gap-1.5">
                 <span className="font-mono text-3xl font-black text-slate-900 tabular-nums">
@@ -605,7 +606,7 @@ export default function BarberControlPage() {
                   </span>
                 )
               ) : (
-                <span>กดปุ่มเรียกคิวซ้ำเพื่อประกาศเสียงเรียกคิวอีกครั้ง</span>
+                <span>ประกาศเรียกอีกครั้ง</span>
               )}
             </div>
 
@@ -633,11 +634,11 @@ export default function BarberControlPage() {
       </section>
 
       {/* โซนที่ 2: ปุ่มกดหลัก 2 ปุ่ม (ออกแบบให้กดด้วยนิ้วโป้งบนจอมือถือแนวตั้งได้ถนัดมือ + กันกดข้ามคิวเบิ้ล) */}
-      <section className="grid grid-cols-2 gap-3">
+      <section className="barber-actions grid grid-cols-2 gap-3" aria-label="จัดการคิว">
         <button
           onClick={handleAddWalkIn}
           disabled={loadingAction !== null}
-          className="flex min-h-[104px] flex-col items-center justify-center rounded-2xl bg-emerald-600 px-3 py-4 text-white shadow-md transition-transform hover:bg-emerald-500 active:scale-[0.98] disabled:opacity-60"
+          className="flex min-h-[112px] flex-col items-center justify-center rounded-2xl bg-emerald-700 px-2 py-3 text-white shadow-md transition-transform hover:bg-emerald-600 active:scale-[0.98] disabled:opacity-60"
         >
           <div className="mb-1.5 flex h-11 w-11 items-center justify-center rounded-full bg-white/20">
             <Plus className="h-7 w-7 stroke-[2.75]" />
@@ -645,28 +646,20 @@ export default function BarberControlPage() {
           <span className="text-base sm:text-lg font-extrabold tracking-tight">
             เพิ่มคิวหน้าร้าน
           </span>
-          <span className="mt-0.5 text-[11px] font-medium text-emerald-100">
-            ออกเลขคิวใหม่ทันที
-          </span>
         </button>
 
         <button
           onClick={handleNextQueue}
           disabled={loadingAction !== null || nextCooldown > 0}
-          className="flex min-h-[104px] flex-col items-center justify-center rounded-2xl bg-blue-600 px-3 py-4 text-white shadow-md transition-transform hover:bg-blue-500 active:scale-[0.98] disabled:bg-slate-400 disabled:opacity-80"
+          className="flex min-h-[112px] flex-col items-center justify-center rounded-2xl bg-slate-900 px-2 py-3 text-white shadow-md transition-transform hover:bg-slate-800 active:scale-[0.98] disabled:bg-slate-400 disabled:opacity-80"
         >
           <div className="mb-1.5 flex h-11 w-11 items-center justify-center rounded-full bg-white/20">
             <FastForward className="h-6 w-6 stroke-[2.5]" />
           </div>
           <span className="text-base sm:text-lg font-extrabold tracking-tight">
             {nextCooldown > 0
-              ? `กันกดซ้ำ (${nextCooldown} วิ)`
-              : 'ไปคิวถัดไป'}
-          </span>
-          <span className="mt-0.5 text-[11px] font-medium text-blue-100">
-            {nextCooldown > 0
-              ? 'เพิ่งเปลี่ยนคิวเมื่อสักครู่'
-              : 'ปิดคิวนี้และเรียกคิวหน้า'}
+              ? `รอ ${nextCooldown} วิ`
+              : 'เรียกคิวถัดไป'}
           </span>
         </button>
       </section>
