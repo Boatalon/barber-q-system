@@ -14,6 +14,7 @@ import {
   getLineClient,
   isLineConfigured,
 } from '@/lib/line';
+import { renderLineMessage } from '@/lib/line-message-templates';
 
 export async function POST(req: NextRequest) {
   try {
@@ -38,6 +39,8 @@ export async function POST(req: NextRequest) {
     const events = parsed.events ?? [];
     const client = getLineClient();
     const settings = await getSettings();
+    const lineText = (key: Parameters<typeof renderLineMessage>[1], values?: Record<string, string | number | null | undefined>) =>
+      renderLineMessage(settings.line_message_templates, key, values);
 
     for (const event of events) {
       const userId = event.source.userId;
@@ -108,57 +111,52 @@ export async function POST(req: NextRequest) {
         if (closedInfo.isClosed) {
           replyMessages.push({
             type: 'text',
-            text: `ยินดีต้อนรับสู่ ${settings.shop_name} ครับ 💈\n\n📌 วันนี้ทางร้านปิดให้บริการ (${closedInfo.reason || 'วันหยุด'})\nจึงยังไม่เปิดรับคิวในวันนี้ครับ สามารถติดตามวันเปิดทำการได้ทางไลน์นี้นะครับ ขอบคุณครับ`,
+            text: lineText('welcome_closed', { shop_name: settings.shop_name, reason: closedInfo.reason || 'วันหยุด' }),
           });
         } else if (!settings.is_accepting_queue) {
-          replyMessages.push({ type: 'text', text: 'ขณะนี้ร้านหยุดรับคิวใหม่ชั่วคราวครับ' });
+          replyMessages.push({ type: 'text', text: lineText('booking_paused') });
         } else if (!isBookingOpen(settings) && getBookingTimeStatus(settings.booking_open_time, settings.booking_close_time ?? '20:00') === 'BEFORE_OPEN') {
-          replyMessages.push({ type: 'text', text: `เปิดรับคิวเวลา ${settings.booking_open_time} น. ครับ` });
+          replyMessages.push({ type: 'text', text: lineText('before_open', { open_time: settings.booking_open_time }) });
         } else if (!isBookingOpen(settings)) {
-          replyMessages.push({ type: 'text', text: `วันนี้ปิดรับคิวแล้วครับ พรุ่งนี้เปิดเวลา ${settings.booking_open_time} น.` });
+          replyMessages.push({ type: 'text', text: lineText('after_close', { open_time: settings.booking_open_time }) });
         } else {
           replyMessages.push({
             type: 'text',
-            text: `ยินดีต้อนรับสู่ ${settings.shop_name} ครับ 💈\n• คิวที่กำลังตัดปัจจุบัน: ${
-              statusInfo.currentServingCode ?? 'ยังไม่มีคิว'
-            }\n• คิวรอทั้งหมด: ${
-              statusInfo.totalWaiting
-            } คิว\n\nสามารถกดเมนู "รับคิว" ด้านล่าง หรือพิมพ์คำว่า "รับคิว" เพื่อรับหมายเลขคิวได้ทันทีโดยไม่ต้องกรอกชื่อหรือเบอร์โทรครับ`,
+            text: lineText('welcome_open', { shop_name: settings.shop_name, current_queue: statusInfo.currentServingCode ?? 'ยังไม่มีคิว', waiting_count: statusInfo.totalWaiting }),
           });
         }
       } else if (action === 'myid') {
         replyMessages.push({
           type: 'text',
-          text: `LINE User ID ของคุณคือ:\n${userId}\n\n(สามารถคัดลอกรหัสนี้ไปใส่ในหน้าตั้งค่าระบบ "LINE User ID ของช่าง" เพื่อรับการแจ้งเตือนเมื่อมีลูกค้าจองคิวครับ)`,
+          text: lineText('my_id', { user_id: userId }),
         });
       } else if (action === 'book') {
         const closedInfo = await isShopClosedToday();
         if (closedInfo.isClosed) {
           replyMessages.push({
             type: 'text',
-            text: `⛔ ขออภัยครับ วันนี้ทางร้านปิดให้บริการ (${closedInfo.reason || 'วันหยุด'})\n\nจึงยังไม่เปิดรับคิวในขณะนี้ สามารถติดตามวันเปิดทำการได้ทางไลน์นี้นะครับ 💈✂️`,
+            text: lineText('booking_holiday', { reason: closedInfo.reason || 'วันหยุด' }),
           });
         } else {
           try {
             const booked = await bookLineQueue(userId);
             replyMessages.push(
               buildQueueFlexMessage({
+                templates: settings.line_message_templates,
                 shopName: settings.shop_name,
                 myQueueCode: booked.queue.display_code,
                 myStatus: booked.queue.status,
                 currentServingCode: booked.currentServingCode,
                 queuesAhead: booked.queue.queuesAhead,
-                headlineText: booked.isNew
-                  ? '✅ รับคิวตัดผมสำเร็จ!'
-                  : '📌 คุณมีหมายเลขคิวที่ใช้งานอยู่แล้ว',
+                headlineText: lineText(booked.isNew ? 'booking_new_title' : 'booking_existing_title'),
               })
             );
           } catch (error) {
             const message = error instanceof Error ? error.message : '';
-            if (message === 'QUEUE_NOT_ACCEPTING') replyMessages.push({ type: 'text', text: 'ขณะนี้ร้านหยุดรับคิวใหม่ชั่วคราวครับ' });
-            else if (message.startsWith('BOOKING_NOT_OPEN_YET:')) replyMessages.push({ type: 'text', text: `เปิดรับคิวเวลา ${message.split(':').slice(1).join(':')} น. ครับ` });
-            else if (message.startsWith('BOOKING_CLOSED_FOR_TODAY:')) replyMessages.push({ type: 'text', text: `วันนี้ปิดรับคิวเวลา ${message.split(':').slice(1).join(':')} น. แล้วครับ พรุ่งนี้เปิดเวลา ${settings.booking_open_time} น.` });
-            else if (message.startsWith('DAILY_LIMIT_REACHED:')) replyMessages.push({ type: 'text', text: `วันนี้คิวเต็มแล้ว (ครบ ${message.split(':')[1]} คิว) ขอบคุณที่สนใจร้าน ${settings.shop_name} ครับ` });
+            if (message === 'QUEUE_NOT_ACCEPTING') replyMessages.push({ type: 'text', text: lineText('booking_paused') });
+            else if (message.startsWith('BOOKING_NOT_OPEN_YET:')) replyMessages.push({ type: 'text', text: lineText('before_open', { open_time: message.split(':').slice(1).join(':') }) });
+            else if (message.startsWith('BOOKING_CLOSED_FOR_TODAY:')) replyMessages.push({ type: 'text', text: lineText('booking_closed', { close_time: message.split(':').slice(1).join(':'), open_time: settings.booking_open_time }) });
+            else if (message.startsWith('DAILY_LIMIT_REACHED:')) replyMessages.push({ type: 'text', text: lineText('booking_limit', { limit: message.split(':')[1], shop_name: settings.shop_name }) });
             else throw error;
           }
         }
@@ -170,27 +168,24 @@ export async function POST(req: NextRequest) {
         if (closedInfo.isClosed) {
           replyMessages.push({
             type: 'text',
-            text: `💈 วันนี้ทางร้านปิดให้บริการ (${closedInfo.reason || 'วันหยุด'})\n\nไม่มีคิวที่กำลังให้บริการในระบบ ขอบคุณครับ ✂️`,
+            text: lineText('status_holiday', { reason: closedInfo.reason || 'วันหยุด' }),
           });
         } else if (statusInfo.activeQueue) {
           replyMessages.push(
             buildQueueFlexMessage({
+              templates: settings.line_message_templates,
               shopName: settings.shop_name,
               myQueueCode: statusInfo.activeQueue.display_code,
               myStatus: statusInfo.activeQueue.status,
               currentServingCode: statusInfo.currentServingCode,
               queuesAhead: statusInfo.activeQueue.queuesAhead,
-              headlineText: '📊 สถานะคิวล่าสุดของคุณ',
+              headlineText: lineText('status_title'),
             })
           );
         } else {
           replyMessages.push({
             type: 'text',
-            text: `ขณะนี้คุณยังไม่มีคิวที่กำลังรอครับ\n• คิวที่กำลังตัดปัจจุบัน: ${
-              statusInfo.currentServingCode ?? 'รอเริ่ม'
-            }\n• คิวรอทั้งหมดในร้าน: ${
-              statusInfo.totalWaiting
-            } คิว\n\nพิมพ์ "รับคิว" หรือกดเมนูรับคิวเพื่อจองคิวได้เลยครับ`,
+            text: lineText('status_no_queue', { current_queue: statusInfo.currentServingCode ?? 'รอเริ่ม', waiting_count: statusInfo.totalWaiting }),
           });
         }
       } else if (action === 'cancel') {
@@ -199,18 +194,19 @@ export async function POST(req: NextRequest) {
           const statusInfo = await getLineUserQueueStatus(userId);
           replyMessages.push(
             buildQueueFlexMessage({
+              templates: settings.line_message_templates,
               shopName: settings.shop_name,
               myQueueCode: cancelled.queue.display_code,
               myStatus: 'CANCELLED',
               currentServingCode: statusInfo.currentServingCode,
               queuesAhead: 0,
-              headlineText: '✖ ยกเลิกคิวเรียบร้อยแล้ว',
+              headlineText: lineText('cancel_title'),
             })
           );
         } else {
           replyMessages.push({
             type: 'text',
-            text: cancelled.reason ?? 'ไม่พบคิวที่กำลังรออยู่ของคุณในขณะนี้',
+            text: lineText('cancel_no_queue'),
           });
         }
       }

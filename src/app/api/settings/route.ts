@@ -4,6 +4,7 @@ import {
   getSystemQueueState,
   updateSettings,
 } from '@/lib/queue-service';
+import { validateLineTemplates } from '@/lib/line-message-templates';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,6 +41,14 @@ export async function PUT(req: NextRequest) {
         return NextResponse.json({ error: 'เวลาเปิดและปิดรับคิวต้องไม่ตรงกัน' }, { status: 400 });
       }
     }
+    let lineMessageTemplates;
+    if ('line_message_templates' in body) {
+      try {
+        lineMessageTemplates = validateLineTemplates(body.line_message_templates);
+      } catch (error) {
+        return NextResponse.json({ error: (error as Error).message }, { status: 400 });
+      }
+    }
     const settings = await updateSettings({
       shop_name: body.shop_name,
       notify_ahead_first:
@@ -66,6 +75,7 @@ export async function PUT(req: NextRequest) {
       daily_queue_limit: 'daily_queue_limit' in body ? (body.daily_queue_limit === null ? null : Number(body.daily_queue_limit)) : undefined,
       booking_open_time: body.booking_open_time,
       booking_close_time: body.booking_close_time,
+      ...(lineMessageTemplates ? { line_message_templates: lineMessageTemplates } : {}),
       ...((body.booking_open_time !== undefined || body.booking_close_time !== undefined)
         ? { accepting_override_until: null } : {}),
     });

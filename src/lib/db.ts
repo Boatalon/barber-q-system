@@ -1,4 +1,5 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import type { LineMessageTemplates } from './line-message-templates';
 
 export type QueueSource = 'LINE' | 'WALK_IN';
 export type QueueStatus = 'WAITING' | 'SERVING' | 'COMPLETED' | 'CANCELLED';
@@ -40,6 +41,7 @@ export interface ShopSettings {
   booking_open_time: string;          // e.g. "08:30" (HH:mm, ICT)
   booking_close_time: string;         // e.g. "20:00" (HH:mm, ICT)
   accepting_override_until: string | null;
+  line_message_templates: LineMessageTemplates;
 }
 
 export interface ShopHolidayRow {

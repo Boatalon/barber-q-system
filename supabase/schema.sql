@@ -50,6 +50,7 @@ create table if not exists public.shop_settings (
   booking_open_time text not null default '08:30',
   booking_close_time text not null default '20:00',
   accepting_override_until timestamptz,
+  line_message_templates jsonb not null default '{}'::jsonb,
   updated_at timestamptz not null default now(),
   constraint shop_settings_daily_queue_limit_positive
     check (daily_queue_limit is null or daily_queue_limit between 1 and 999),
@@ -72,6 +73,7 @@ create table if not exists public.notification_logs (
   line_user_id text not null,
   trigger_type text not null, -- 'BOOKED', 'NEAR_1', 'NEAR_2', 'CALLED', 'RECALL', 'CANCELLED'
   message text not null,
+  queues_ahead integer,
   delivered_via text not null default 'SIMULATOR', -- 'LINE_API' or 'SIMULATOR'
   created_at timestamptz not null default now()
 );

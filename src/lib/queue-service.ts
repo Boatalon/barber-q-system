@@ -13,6 +13,12 @@ import {
   sendLineNotification,
 } from './line';
 import { getBookingTimeStatus, getQueueBusinessDate, isBookingOpen, type BookingTimeStatus } from './booking-hours';
+import { renderLineMessage, type LineMessageTemplates } from './line-message-templates';
+import { wasNearNoticeSent } from './line-notification-dedupe';
+
+const lineText = (settings: ShopSettings, key: Parameters<typeof renderLineMessage>[1], values?: Record<string, string | number | null | undefined>) =>
+  renderLineMessage(settings.line_message_templates, key, values);
+const cardTemplates = (settings: ShopSettings): { templates: LineMessageTemplates } => ({ templates: settings.line_message_templates });
 
 export interface EnrichedQueueItem extends QueueRow {
   queuesAhead: number;
@@ -100,6 +106,7 @@ export async function getSettings(): Promise<ShopSettings> {
     booking_open_time: '08:30',
     booking_close_time: '20:00',
     accepting_override_until: null,
+    line_message_templates: {},
   };
 
   const { error: insertError } = await supabase.from('shop_settings').upsert(fallback);
@@ -125,6 +132,7 @@ export async function updateSettings(
       | 'booking_open_time'
       | 'booking_close_time'
       | 'accepting_override_until'
+      | 'line_message_templates'
     >
   >
 ): Promise<ShopSettings> {
@@ -144,6 +152,7 @@ export async function updateSettings(
     ...(typeof input.booking_open_time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(input.booking_open_time) ? { booking_open_time: input.booking_open_time } : {}),
     ...(typeof input.booking_close_time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(input.booking_close_time) ? { booking_close_time: input.booking_close_time } : {}),
     ...('accepting_override_until' in input ? { accepting_override_until: input.accepting_override_until ?? null } : {}),
+    ...('line_message_templates' in input ? { line_message_templates: input.line_message_templates ?? {} } : {}),
     updated_at: new Date().toISOString(),
   };
 
@@ -413,7 +422,7 @@ export async function evaluateQueueNotifications(
   const queueIds = lineWaiting.map((item) => item.id);
   const { data: existingLogsData } = await supabase
     .from('notification_logs')
-    .select('queue_id, trigger_type, message')
+    .select('queue_id, trigger_type, message, queues_ahead')
     .in('queue_id', queueIds)
     .in('trigger_type', ['NEAR_1', 'NEAR_2']);
 
@@ -422,20 +431,14 @@ export async function evaluateQueueNotifications(
       queue_id: number;
       trigger_type: string;
       message: string;
+      queues_ahead: number | null;
     }> | null) ?? [];
 
   const tasks: Promise<NotificationLogRow | null>[] = lineWaiting.map(
     async (item) => {
       if (!item.line_user_id) return null;
 
-      const aheadToken1 = `เหลืออีกเพียง ${item.queuesAhead} คิว`;
-      const aheadToken2 = `เหลืออีก ${item.queuesAhead} คิว`;
-      const alreadySentForThisCount = existingLogs.some(
-        (log) =>
-          log.queue_id === item.id &&
-          (log.message.includes(aheadToken1) ||
-            log.message.includes(aheadToken2))
-      );
+      const alreadySentForThisCount = wasNearNoticeSent(existingLogs, item.id, item.queuesAhead);
 
       if (alreadySentForThisCount) {
         return null;
@@ -445,7 +448,7 @@ export async function evaluateQueueNotifications(
         item.queuesAhead <= settings.notify_ahead_second ||
         item.queuesAhead === 1
       ) {
-        const msg = `⏳ เตรียมตัวได้เลยครับ! คิว ${item.display_code} ของคุณเหลืออีกเพียง ${item.queuesAhead} คิวก่อนถึงลำดับ (คิวที่กำลังตัดปัจจุบัน: ${currentServingCode ?? '-'})`;
+        const msg = lineText(settings, 'near_second', { queue_code: item.display_code, queues_ahead: item.queuesAhead, current_queue: currentServingCode ?? '-' });
         const [, log] = await Promise.all([
           supabase
             .from('queues')
@@ -457,20 +460,22 @@ export async function evaluateQueueNotifications(
             lineUserId: item.line_user_id,
             triggerType: 'NEAR_2',
             message: msg,
+            queuesAhead: item.queuesAhead,
             flexPayload: {
+              ...cardTemplates(settings),
               shopName: formatShopDisplayName(settings.shop_name),
               myQueueCode: item.display_code,
               myStatus: 'WAITING',
               currentServingCode,
               queuesAhead: item.queuesAhead,
-              headlineText: `เหลืออีก ${item.queuesAhead} คิวจะถึงลำดับของคุณ!`,
+              headlineText: lineText(settings, 'near_second_title', { queues_ahead: item.queuesAhead }),
             },
           }),
         ]);
         return log;
       }
 
-      const msg = `🔔 แจ้งเตือนคิว ${item.display_code}: ขณะนี้เหลืออีก ${item.queuesAhead} คิวก่อนถึงลำดับของคุณ (คิวที่กำลังตัดปัจจุบัน: ${currentServingCode ?? '-'})`;
+      const msg = lineText(settings, 'near_first', { queue_code: item.display_code, queues_ahead: item.queuesAhead, current_queue: currentServingCode ?? '-' });
       const [, log] = await Promise.all([
         supabase
           .from('queues')
@@ -482,13 +487,15 @@ export async function evaluateQueueNotifications(
           lineUserId: item.line_user_id,
           triggerType: 'NEAR_1',
           message: msg,
+          queuesAhead: item.queuesAhead,
           flexPayload: {
+            ...cardTemplates(settings),
             shopName: formatShopDisplayName(settings.shop_name),
             myQueueCode: item.display_code,
             myStatus: 'WAITING',
             currentServingCode,
             queuesAhead: item.queuesAhead,
-            headlineText: `เหลืออีก ${item.queuesAhead} คิวก่อนถึงลำดับของคุณ`,
+            headlineText: lineText(settings, 'near_first_title', { queues_ahead: item.queuesAhead }),
           },
         }),
       ]);
@@ -537,7 +544,7 @@ export async function processDueRepeatCalls(): Promise<NotificationLogRow | null
     .update({ call_count: nextCallCount, last_called_at: nowIso })
     .eq('id', serving.id);
 
-  const msg = `📢 เรียกคิวซ้ำ (${nextCallCount}/${settings.repeat_call_max_count}): ถึงคิวหมายเลข ${serving.display_code} แล้วครับ กรุณาเข้ารับบริการที่ร้าน`;
+  const msg = lineText(settings, 'recall', { call_count: nextCallCount, max_calls: settings.repeat_call_max_count, queue_code: serving.display_code });
   return sendLineNotification({
     queueId: serving.id,
     displayCode: serving.display_code,
@@ -545,12 +552,13 @@ export async function processDueRepeatCalls(): Promise<NotificationLogRow | null
     triggerType: 'RECALL',
     message: msg,
     flexPayload: {
+      ...cardTemplates(settings),
       shopName: formatShopDisplayName(settings.shop_name),
       myQueueCode: serving.display_code,
       myStatus: 'SERVING',
       currentServingCode: serving.display_code,
       queuesAhead: 0,
-      headlineText: `เรียกคิวครั้งที่ ${nextCallCount}/${settings.repeat_call_max_count} - เชิญที่ร้านได้เลยครับ`,
+      headlineText: lineText(settings, 'recall_title', { call_count: nextCallCount, max_calls: settings.repeat_call_max_count }),
     },
   });
 }
@@ -694,22 +702,23 @@ export async function bookLineQueue(
 
   const aheadText =
     newQueue.queuesAhead === 0
-      ? 'คุณเป็นคิวแรกในรายการรอ'
-      : `มีคิวข้างหน้า ${newQueue.queuesAhead} คิว`;
+      ? lineText(settings, 'booked_ahead_first')
+      : lineText(settings, 'booked_ahead_waiting', { queues_ahead: newQueue.queuesAhead });
 
   await sendLineNotification({
     queueId: newQueue.id,
     displayCode: newQueue.display_code,
     lineUserId,
     triggerType: 'BOOKED',
-    message: `✅ รับคิวสำเร็จ! หมายเลขคิวของคุณคือ ${newQueue.display_code} (${aheadText})`,
+    message: lineText(settings, 'booked_push', { queue_code: newQueue.display_code, ahead_text: aheadText }),
     flexPayload: {
+      ...cardTemplates(settings),
       shopName: formatShopDisplayName(settings.shop_name),
       myQueueCode: newQueue.display_code,
       myStatus: 'WAITING',
       currentServingCode: updated.serving?.display_code ?? null,
       queuesAhead: newQueue.queuesAhead,
-      headlineText: 'รับคิวตัดผมสำเร็จ!',
+      headlineText: lineText(settings, 'booking_new_title'),
     },
   });
 
@@ -852,14 +861,15 @@ export async function cancelLineQueue(lineUserId: string): Promise<{
     displayCode: targetRow.display_code,
     lineUserId,
     triggerType: 'CANCELLED',
-    message: `✖ ยกเลิกคิวหมายเลข ${targetRow.display_code} เรียบร้อยแล้วครับ`,
+    message: lineText(settings, 'cancelled', { queue_code: targetRow.display_code }),
     flexPayload: {
+      ...cardTemplates(settings),
       shopName: formatShopDisplayName(settings.shop_name),
       myQueueCode: targetRow.display_code,
       myStatus: 'CANCELLED',
       currentServingCode: serving?.display_code ?? null,
       queuesAhead: 0,
-      headlineText: 'ยกเลิกคิวเรียบร้อยแล้ว',
+      headlineText: lineText(settings, 'cancel_title'),
     },
   });
 
@@ -950,21 +960,16 @@ export async function cancelQueueById(
           displayCode: targetRow.display_code,
           lineUserId: targetRow.line_user_id,
           triggerType: 'CANCELLED',
-          message: isNoShow
-            ? `✖ คิวหมายเลข ${targetRow.display_code} ของคุณถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการครับ`
-            : `✖ คิวหมายเลข ${targetRow.display_code} ถูกยกเลิกแล้วครับ`,
+          message: lineText(settings, isNoShow ? 'no_show' : 'cancelled_by_shop', { queue_code: targetRow.display_code }),
           flexPayload: {
+            ...cardTemplates(settings),
             shopName: formatShopDisplayName(settings.shop_name),
             myQueueCode: targetRow.display_code,
             myStatus: 'CANCELLED',
             currentServingCode: serving?.display_code ?? null,
             queuesAhead: 0,
-            headlineText: isNoShow
-              ? 'ถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการ'
-              : 'ยกเลิกคิวเรียบร้อยแล้ว',
-            statusTextOverride: isNoShow
-              ? 'ถูกข้ามไปแล้วเนื่องจากไม่มาให้บริการ'
-              : 'ยกเลิกคิวแล้ว',
+            headlineText: lineText(settings, isNoShow ? 'no_show_title' : 'cancel_title'),
+            statusTextOverride: isNoShow ? lineText(settings, 'no_show_title') : lineText(settings, 'card_cancelled'),
           },
         })
       : Promise.resolve(),
@@ -976,14 +981,15 @@ export async function cancelQueueById(
           displayCode: nextServingCandidate.display_code,
           lineUserId: nextServingCandidate.line_user_id,
           triggerType: 'CALLED',
-          message: `🎉 ถึงคิวหมายเลข ${nextServingCandidate.display_code} ของคุณแล้วครับ! เชิญเข้ารับบริการที่ร้านได้เลยครับ (เรียกครั้งที่ 1/${settings.repeat_call_max_count})`,
+          message: lineText(settings, 'called', { queue_code: nextServingCandidate.display_code, call_count: 1, max_calls: settings.repeat_call_max_count }),
           flexPayload: {
+            ...cardTemplates(settings),
             shopName: formatShopDisplayName(settings.shop_name),
             myQueueCode: nextServingCandidate.display_code,
             myStatus: 'SERVING',
             currentServingCode: nextServingCandidate.display_code,
             queuesAhead: 0,
-            headlineText: '🎉 ถึงคิวของคุณแล้ว! เชิญที่ร้านได้เลยครับ',
+            headlineText: lineText(settings, 'called_title'),
           },
         })
       : Promise.resolve(),
@@ -1052,14 +1058,15 @@ export async function advanceToNextQueue(): Promise<{
           displayCode: nextWaiting.display_code,
           lineUserId: nextWaiting.line_user_id,
           triggerType: 'CALLED',
-          message: `🎉 ถึงคิวหมายเลข ${nextWaiting.display_code} ของคุณแล้วครับ! เชิญเข้ารับบริการที่ร้านได้เลยครับ (เรียกครั้งที่ 1/${settings.repeat_call_max_count})`,
+          message: lineText(settings, 'called', { queue_code: nextWaiting.display_code, call_count: 1, max_calls: settings.repeat_call_max_count }),
           flexPayload: {
+            ...cardTemplates(settings),
             shopName: formatShopDisplayName(settings.shop_name),
             myQueueCode: nextWaiting.display_code,
             myStatus: 'SERVING',
             currentServingCode: nextWaiting.display_code,
             queuesAhead: 0,
-            headlineText: '🎉 ถึงคิวของคุณแล้ว! เชิญที่ร้านได้เลยครับ',
+            headlineText: lineText(settings, 'called_title'),
           },
         })
       : Promise.resolve(),
@@ -1106,7 +1113,7 @@ export async function manualRecallCurrentQueue(): Promise<{
   if (recallError) throw recallError;
 
   if (serving.source === 'LINE' && serving.line_user_id) {
-    const msg = `📢 เรียกคิวซ้ำ (ครั้งที่ ${nextCallCount}): ถึงคิวหมายเลข ${serving.display_code} แล้วครับ กรุณาเข้ารับบริการที่ร้าน`;
+    const msg = lineText(settings, 'recall', { call_count: nextCallCount, max_calls: settings.repeat_call_max_count, queue_code: serving.display_code });
     const notifyPromise = sendLineNotification({
       queueId: serving.id,
       displayCode: serving.display_code,
@@ -1114,12 +1121,13 @@ export async function manualRecallCurrentQueue(): Promise<{
       triggerType: 'RECALL',
       message: msg,
       flexPayload: {
+        ...cardTemplates(settings),
         shopName: formatShopDisplayName(settings.shop_name),
         myQueueCode: serving.display_code,
         myStatus: 'SERVING',
         currentServingCode: serving.display_code,
         queuesAhead: 0,
-        headlineText: `📢 เรียกคิวหมายเลข ${serving.display_code} ซ้ำ (ครั้งที่ ${nextCallCount})`,
+        headlineText: lineText(settings, 'recall_title', { call_count: nextCallCount, max_calls: settings.repeat_call_max_count }),
       },
     });
 
@@ -1234,14 +1242,15 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
           displayCode: serving.display_code,
           lineUserId: serving.line_user_id,
           triggerType: 'RECALL',
-          message: `📢 เรียกคิวซ้ำ (${nextCallCount}/${settings.repeat_call_max_count}): ถึงคิวหมายเลข ${serving.display_code} แล้วครับ กรุณาเข้ารับบริการที่ร้าน`,
+          message: lineText(settings, 'recall', { call_count: nextCallCount, max_calls: settings.repeat_call_max_count, queue_code: serving.display_code }),
           flexPayload: {
+            ...cardTemplates(settings),
             shopName: formatShopDisplayName(settings.shop_name),
             myQueueCode: serving.display_code,
             myStatus: 'SERVING',
             currentServingCode: serving.display_code,
             queuesAhead: 0,
-            headlineText: `เรียกคิวครั้งที่ ${nextCallCount}/${settings.repeat_call_max_count} - เชิญที่ร้านได้เลยครับ`,
+            headlineText: lineText(settings, 'recall_title', { call_count: nextCallCount, max_calls: settings.repeat_call_max_count }),
           },
         }),
       ]);

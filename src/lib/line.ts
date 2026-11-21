@@ -1,5 +1,6 @@
 import { messagingApi } from '@line/bot-sdk';
 import { getSupabase, type NotificationLogRow } from './db';
+import { renderLineMessage, type LineMessageTemplates } from './line-message-templates';
 
 export function isLineConfigured(): boolean {
   const token = process.env.LINE_CHANNEL_ACCESS_TOKEN;
@@ -27,6 +28,7 @@ export interface QueueCardPayload {
   queuesAhead: number;
   headlineText: string;
   statusTextOverride?: string;
+  templates?: LineMessageTemplates;
 }
 
 /**
@@ -43,7 +45,10 @@ export function buildQueueFlexMessage(
     queuesAhead,
     headlineText,
     statusTextOverride,
+    templates,
   } = payload;
+  const cardText = (key: Parameters<typeof renderLineMessage>[1], values?: Record<string, string | number>) =>
+    renderLineMessage(templates, key, values);
 
   const isServing = myStatus === 'SERVING';
   const isWaiting = myStatus === 'WAITING';
@@ -58,14 +63,14 @@ export function buildQueueFlexMessage(
   const statusText =
     statusTextOverride ??
     (isServing
-      ? 'ถึงคิวของคุณแล้ว! เชิญที่เก้าอี้ตัดผม'
+      ? cardText('card_serving')
       : isWaiting
         ? queuesAhead === 0
-          ? 'คุณคือคิวแรก รอช่างกดเริ่มคิว'
-          : `รออีก ${queuesAhead} คิวก่อนถึงลำดับของคุณ`
+          ? cardText('card_waiting_first')
+          : cardText('card_waiting', { queues_ahead: queuesAhead })
         : isCancelled
-          ? 'ยกเลิกคิวแล้ว'
-          : 'ให้บริการเสร็จสิ้น');
+          ? cardText('card_cancelled')
+          : cardText('card_completed'));
 
   const footerContents: messagingApi.FlexComponent[] = [];
 
@@ -77,9 +82,9 @@ export function buildQueueFlexMessage(
       height: 'sm',
       action: {
         type: 'postback',
-        label: '🔄 เช็คสถานะคิวล่าสุด',
+        label: cardText('card_status_button'),
         data: 'action=status',
-        displayText: 'เช็คสถานะคิว',
+        displayText: cardText('card_status_display'),
       },
     });
   }
@@ -92,9 +97,9 @@ export function buildQueueFlexMessage(
       margin: 'sm',
       action: {
         type: 'postback',
-        label: '✖ ยกเลิกคิว',
+        label: cardText('card_cancel_button'),
         data: 'action=cancel',
-        displayText: 'ขอยกเลิกคิว',
+        displayText: cardText('card_cancel_display'),
       },
     });
   } else if (myStatus === 'CANCELLED' || myStatus === 'COMPLETED') {
@@ -105,16 +110,16 @@ export function buildQueueFlexMessage(
       height: 'sm',
       action: {
         type: 'postback',
-        label: '➕ กดรับคิวใหม่',
+        label: cardText('card_book_button'),
         data: 'action=book',
-        displayText: 'รับคิวตัดผม',
+        displayText: cardText('card_book_display'),
       },
     });
   }
 
   return {
     type: 'flex',
-    altText: `${headlineText} | คิวของคุณ: ${myQueueCode} | คิวปัจจุบัน: ${currentServingCode ?? '-'}`,
+    altText: cardText('card_alt', { headline: headlineText, queue_code: myQueueCode, current_queue: currentServingCode ?? '-' }),
     contents: {
       type: 'bubble',
       size: 'mega',
@@ -158,14 +163,14 @@ export function buildQueueFlexMessage(
             contents: [
               {
                 type: 'text',
-                text: 'คิวที่กำลังให้บริการปัจจุบัน',
+                text: cardText('card_current_label'),
                 size: 'xs',
                 color: '#64748b',
                 weight: 'bold',
               },
               {
                 type: 'text',
-                text: currentServingCode ?? 'รอเริ่ม',
+                text: currentServingCode ?? cardText('card_no_serving'),
                 size: 'xxl',
                 weight: 'bold',
                 color: '#0f172a',
@@ -183,7 +188,7 @@ export function buildQueueFlexMessage(
             contents: [
               {
                 type: 'text',
-                text: 'หมายเลขคิวของคุณ',
+                text: cardText('card_my_label'),
                 size: 'sm',
                 color: statusBadgeColor,
                 weight: 'bold',
@@ -210,7 +215,7 @@ export function buildQueueFlexMessage(
           },
           ...((isWaiting || isServing) ? [{
             type: 'text' as const,
-            text: ' **กรุณามาถึงร้านภายใน 10 นาทีเมื่อถึงคิว มิฉะนั้นทางร้านขอสงวนสิทธิ์เรียกคิวถัดไป!!',
+            text: cardText('card_notice'),
             color: '#ff0000ff',
             size: 'sm' as const,
             weight: 'bold' as const,
@@ -244,6 +249,7 @@ export async function sendLineNotification(params: {
   triggerType: NotificationLogRow['trigger_type'];
   message: string;
   flexPayload?: QueueCardPayload;
+  queuesAhead?: number;
 }): Promise<NotificationLogRow> {
   const supabase = getSupabase();
   const client = getLineClient();
@@ -277,6 +283,7 @@ export async function sendLineNotification(params: {
       line_user_id: params.lineUserId,
       trigger_type: params.triggerType,
       message: params.message,
+      ...(params.queuesAhead !== undefined ? { queues_ahead: params.queuesAhead } : {}),
       delivered_via: deliveredVia,
       created_at: now,
     })

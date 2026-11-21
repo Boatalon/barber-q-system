@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { getSettings, formatShopDisplayName } from '@/lib/queue-service';
 import { getSupabase, getTodayDateString, type ShopHolidayRow } from '@/lib/db';
 import { broadcastLineMessage } from '@/lib/line';
+import { renderLineMessage } from '@/lib/line-message-templates';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,10 +38,9 @@ export async function GET() {
     const reason = holiday.reason || 'วันหยุดประจำร้าน';
 
     // สร้างข้อความ broadcast
-    const message =
-      `📢 ประกาศจากร้าน ${shopName}\n` +
-      `วันนี้ทางร้านหยุดให้บริการ 1 วัน (${reason}) นะครับ\n` +
-      `ขออภัยในความไม่สะดวกครับ 💈✂️`;
+    const message = renderLineMessage(settings.line_message_templates, 'holiday_announcement', {
+      shop_name: shopName, dates: today, reason,
+    });
 
     // Claim the current record so concurrent cron requests cannot announce it twice.
     const { data: claimed, error: claimError } = await supabase
