@@ -48,16 +48,11 @@ create table if not exists public.shop_settings (
   daily_queue_limit integer default null,
   is_accepting_queue boolean not null default true,
   booking_open_time text not null default '08:30',
-  booking_close_time text not null default '20:00',
   updated_at timestamptz not null default now(),
   constraint shop_settings_daily_queue_limit_positive
     check (daily_queue_limit is null or daily_queue_limit between 1 and 999),
   constraint shop_settings_booking_open_time_format
-    check (booking_open_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
-  constraint shop_settings_booking_close_time_format
-    check (booking_close_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
-  constraint shop_settings_booking_hours_order
-    check (booking_open_time < booking_close_time)
+    check (booking_open_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$')
 );
 
 insert into public.shop_settings (id)
@@ -120,9 +115,6 @@ begin
   end if;
   if (now() at time zone 'Asia/Bangkok')::time < limits.booking_open_time::time then
     raise exception 'BOOKING_NOT_OPEN_YET:%', limits.booking_open_time;
-  end if;
-  if (now() at time zone 'Asia/Bangkok')::time >= limits.booking_close_time::time then
-    raise exception 'BOOKING_CLOSED_FOR_TODAY:%', limits.booking_close_time;
   end if;
   if limits.daily_queue_limit is not null then
     select count(*) into issued_count from public.queues

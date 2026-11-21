@@ -136,7 +136,6 @@ export default function SettingsPage() {
     barber_line_user_id: '',
     daily_queue_limit: null as number | null,
     booking_open_time: '08:30',
-    booking_close_time: '20:00',
     is_accepting_queue: true,
   });
 
@@ -216,7 +215,6 @@ export default function SettingsPage() {
             barber_line_user_id: sData.settings.barber_line_user_id ?? '',
             daily_queue_limit: sData.settings.daily_queue_limit ?? null,
             booking_open_time: sData.settings.booking_open_time ?? '08:30',
-            booking_close_time: sData.settings.booking_close_time ?? '20:00',
             is_accepting_queue: sData.settings.is_accepting_queue ?? true,
           });
         }
@@ -304,7 +302,6 @@ export default function SettingsPage() {
         : activeTab === 'queue'
           ? {
             daily_queue_limit: form.daily_queue_limit, booking_open_time: form.booking_open_time,
-            booking_close_time: form.booking_close_time,
             is_accepting_queue: form.is_accepting_queue, walkin_popup_duration_sec: form.walkin_popup_duration_sec
           }
           : {
@@ -331,25 +328,26 @@ export default function SettingsPage() {
     }
   };
 
-  // ปุ่มด่วน: สั่งกลับมารับคิวใหม่ทันที
-  const handleResumeAccepting = async () => {
+  // สลับสถานะเปิด/หยุดรับคิวทันที
+  const handleToggleAcceptingQueue = async () => {
     setSaving(true);
     setErrorBanner(null);
+    const nextState = !form.is_accepting_queue;
     try {
       const res = await fetch('/api/queue/toggle-accepting', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isAcceptingQueue: true }),
+        body: JSON.stringify({ isAcceptingQueue: nextState }),
       });
       if (res.ok) {
-        setForm((prev) => ({ ...prev, is_accepting_queue: true }));
-        setSavedBanner('กลับมารับคิวใหม่เรียบร้อยแล้ว');
+        setForm((prev) => ({ ...prev, is_accepting_queue: nextState }));
+        setSavedBanner(nextState ? 'กลับมารับคิวใหม่เรียบร้อยแล้ว' : 'หยุดรับคิวชั่วคราวเรียบร้อยแล้ว');
         setTimeout(() => setSavedBanner(null), 3500);
       } else {
-        setErrorBanner('ไม่สามารถเปิดรับคิวได้');
+        setErrorBanner('ไม่สามารถเปลี่ยนสถานะได้');
       }
     } catch {
-      setErrorBanner('การเชื่อมต่อขัดข้อง ไม่สามารถเปิดรับคิวได้');
+      setErrorBanner('การเชื่อมต่อขัดข้อง ไม่สามารถเปลี่ยนสถานะได้');
     } finally {
       setSaving(false);
     }
@@ -793,36 +791,40 @@ export default function SettingsPage() {
                     onChange={(e) => setForm((prev) => ({ ...prev, booking_open_time: e.target.value }))}
                     className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
                 </label>
-                <label className="block text-sm font-bold text-slate-800">เวลาหยุดรับคิวอัตโนมัติ
-                  <input type="time" value={form.booking_close_time}
-                    onChange={(e) => setForm((prev) => ({ ...prev, booking_close_time: e.target.value }))}
-                    className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
-                </label>
-                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50/70 p-3 sm:col-span-2">
-                  <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-bold text-slate-800">
-                    <input type="checkbox" checked={form.is_accepting_queue}
-                      onChange={(e) => setForm((prev) => ({ ...prev, is_accepting_queue: e.target.checked }))}
-                      className="h-5 w-5 rounded accent-emerald-700" />
-                    <span>รับคิวใหม่</span>
-                    {!form.is_accepting_queue && (
-                      <span className="rounded-full bg-rose-100 px-2 py-0.5 text-xs font-bold text-rose-700">
-                        (หยุดรับอยู่)
-                      </span>
-                    )}
-                  </label>
-                  <button
-                    type="button"
-                    onClick={handleResumeAccepting}
-                    disabled={saving}
-                    className={`inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl px-4 py-2 text-xs font-bold sm:text-sm transition-all ${
-                      !form.is_accepting_queue
-                        ? 'bg-emerald-600 text-white shadow-sm hover:bg-emerald-700 active:scale-95'
-                        : 'border border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100'
-                    }`}
-                  >
-                    <PlayCircle className="h-4 w-4 shrink-0" />
-                    <span>กลับมารับคิว</span>
-                  </button>
+                {/* ปุ่มสลับสถานะเปิด / หยุดรับคิว (LINE & หน้าร้าน) */}
+                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 sm:col-span-2">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold text-slate-900">สถานะการรับคิว</p>
+                      <p className="text-xs text-slate-600 mt-0.5">
+                        {form.is_accepting_queue
+                          ? 'ขณะนี้ระบบเปิดให้ลูกค้าจองคิวผ่าน LINE และหน้าร้านได้ตามปกติ'
+                          : 'ขณะนี้ระบบปฏิเสธการจองคิว ลูกค้าที่กดจองมาจะได้รับข้อความว่าหยุดรับคิว'}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleToggleAcceptingQueue}
+                      disabled={saving}
+                      className={`inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold shadow-sm transition-all ${
+                        form.is_accepting_queue
+                          ? 'border border-emerald-300 bg-emerald-600 text-white hover:bg-emerald-700'
+                          : 'border border-rose-400 bg-rose-600 text-white hover:bg-rose-700 shadow-rose-200'
+                      }`}
+                    >
+                      {form.is_accepting_queue ? (
+                        <>
+                          <Check className="h-4 w-4" />
+                          <span>🟢 เปิดรับคิวอยู่ (กดเพื่อหยุดรับ)</span>
+                        </>
+                      ) : (
+                        <>
+                          <PlayCircle className="h-4 w-4" />
+                          <span>🔴 หยุดรับคิวแล้ว (กดเพื่อเปิดรับ)</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
                 <label className="block text-sm font-bold text-slate-800 sm:col-span-2">เวลาแสดงคิวหน้าร้านล่าสุด (วินาที)
                   <input type="number" min={3} max={30} value={form.walkin_popup_duration_sec}

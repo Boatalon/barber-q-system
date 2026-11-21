@@ -6,7 +6,6 @@ import {
   cancelLineQueue,
   getLineUserQueueStatus,
   getSettings,
-  isAtOrAfterBookingCloseTime,
   isBeforeBookingOpenTime,
   isShopClosedToday,
 } from '@/lib/queue-service';
@@ -115,8 +114,6 @@ export async function POST(req: NextRequest) {
           replyMessages.push({ type: 'text', text: 'ขณะนี้ร้านหยุดรับคิวใหม่ชั่วคราวครับ' });
         } else if (isBeforeBookingOpenTime(settings.booking_open_time)) {
           replyMessages.push({ type: 'text', text: `เปิดรับคิวเวลา ${settings.booking_open_time} น. ครับ` });
-        } else if (isAtOrAfterBookingCloseTime(settings.booking_close_time ?? '20:00')) {
-          replyMessages.push({ type: 'text', text: `วันนี้หยุดรับคิวแล้วครับ พรุ่งนี้เปิดรับคิวเวลา ${settings.booking_open_time} น.` });
         } else {
           replyMessages.push({
             type: 'text',
@@ -158,7 +155,6 @@ export async function POST(req: NextRequest) {
             const message = error instanceof Error ? error.message : '';
             if (message === 'QUEUE_NOT_ACCEPTING') replyMessages.push({ type: 'text', text: 'ขณะนี้ร้านหยุดรับคิวใหม่ชั่วคราวครับ' });
             else if (message.startsWith('BOOKING_NOT_OPEN_YET:')) replyMessages.push({ type: 'text', text: `เปิดรับคิวเวลา ${message.split(':').slice(1).join(':')} น. ครับ` });
-            else if (message.startsWith('BOOKING_CLOSED_FOR_TODAY:')) replyMessages.push({ type: 'text', text: `วันนี้หยุดรับคิวตั้งแต่ ${message.split(':').slice(1).join(':')} น. แล้วครับ พรุ่งนี้เปิดรับคิวใหม่เวลา ${settings.booking_open_time} น.` });
             else if (message.startsWith('DAILY_LIMIT_REACHED:')) replyMessages.push({ type: 'text', text: `วันนี้คิวเต็มแล้ว (ครบ ${message.split(':')[1]} คิว) ขอบคุณที่สนใจร้าน ${settings.shop_name} ครับ` });
             else throw error;
           }

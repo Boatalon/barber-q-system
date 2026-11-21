@@ -418,20 +418,21 @@ export default function BarberControlPage() {
       )}
 
       {/* แบนเนอร์แจ้งเตือนเมื่อหยุดรับคิวชั่วคราว */}
-      {!isAcceptingQueue && queueTimeStatus === 'OPEN' && (
+      {!isAcceptingQueue && (
         <div
           role="alert"
-          className="flex items-center justify-between gap-2 rounded-xl border border-orange-200 bg-orange-50 px-3.5 py-2.5 text-xs font-bold text-orange-900"
+          className="flex items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-bold text-rose-900"
         >
           <div className="flex items-center gap-2">
-            <PauseCircle className="h-4 w-4 text-orange-600 shrink-0" />
-            <span>ขณะนี้ <strong>หยุดรับคิวใหม่</strong> ทั้ง LINE และหน้าร้าน</span>
+            <PauseCircle className="h-4 w-4 text-rose-600 shrink-0" />
+            <span>ขณะนี้ <strong>หยุดรับคิวใหม่</strong> ทั้ง LINE และหน้าร้าน (ลูกค้าจองมาจะขึ้นว่าหยุดรับคิว)</span>
           </div>
           <button
-            onClick={() => setShowStopAcceptingModal(true)}
+            onClick={handleToggleAccepting}
+            disabled={loadingToggle}
             className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-700 shrink-0"
           >
-            เปิดรับใหม่
+            เปิดรับคิวใหม่
           </button>
         </div>
       )}
@@ -473,21 +474,17 @@ export default function BarberControlPage() {
           {/* ปุ่มหยุด/เปิดรับคิว */}
           <button
             onClick={() => isAcceptingQueue ? setShowStopAcceptingModal(true) : handleToggleAccepting()}
-            disabled={loadingToggle || queueTimeStatus !== 'OPEN'}
-            className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm sm:px-5 sm:text-base font-bold transition-colors disabled:opacity-50 ${
-              queueTimeStatus !== 'OPEN'
-                ? 'border-slate-200 bg-slate-100 text-slate-600'
-                : isAcceptingQueue
-                ? 'border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100'
-                : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
+            disabled={loadingToggle}
+            className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm sm:px-5 sm:text-base font-bold transition-all shadow-sm disabled:opacity-50 ${
+              !isAcceptingQueue
+                ? 'border-rose-400 bg-rose-600 text-white hover:bg-rose-700 shadow-rose-200'
+                : 'border-emerald-300 bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-200'
             }`}
           >
-            {queueTimeStatus !== 'OPEN' ? (
-              <><Clock className="h-5 w-5 shrink-0" /><span>{queueTimeStatus === 'BEFORE_OPEN' ? 'ยังไม่เปิดรับคิว' : 'หมดเวลารับคิว'}</span></>
-            ) : isAcceptingQueue ? (
-              <><PauseCircle className="h-5 w-5 shrink-0" /><span>หยุดรับคิว</span></>
+            {!isAcceptingQueue ? (
+              <><PlayCircle className="h-5 w-5 shrink-0" /><span>🔴 หยุดรับคิวแล้ว (แตะเพื่อเปิดรับ)</span></>
             ) : (
-              <><PlayCircle className="h-5 w-5 shrink-0" /><span>เปิดรับคิว</span></>
+              <><PauseCircle className="h-5 w-5 shrink-0" /><span>🟢 เปิดรับคิวอยู่ (กดหยุดรับ)</span></>
             )}
           </button>
           <div className="col-span-2 flex items-center gap-2">
