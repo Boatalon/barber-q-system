@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   Save,
   RotateCcw,
@@ -16,6 +16,7 @@ import {
   Calendar as CalendarIcon,
   X,
   Plus,
+  Minus,
   Send,
   DoorOpen,
   DoorClosed,
@@ -36,6 +37,57 @@ const previewValues = {
   user_id: 'Uxxxxxxxx', dates: '22 พ.ย. 2569',
   headline: 'ถึงคิวของคุณแล้ว',
 };
+
+function SettingsItem({ id, title, children, defaultOpen = false, subtle = false }: {
+  id: string;
+  title: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  subtle?: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <section className={`overflow-hidden rounded-2xl border transition-colors ${open ? (subtle ? 'border-slate-200 bg-white' : 'border-emerald-200 bg-emerald-50') : 'border-slate-200 bg-white'}`}>
+      <button type="button" aria-expanded={open} aria-controls={`${id}-content`}
+        onClick={() => setOpen((value) => !value)}
+        className="flex min-h-14 w-full items-center justify-between gap-3 px-4 py-3 text-left text-sm font-semibold text-slate-900 sm:text-base">
+        <span>{title}</span>
+        {open ? <Minus className="h-5 w-5 shrink-0 text-emerald-800" /> : <Plus className="h-5 w-5 shrink-0 text-emerald-800" />}
+      </button>
+      {open && <div id={`${id}-content`} className={`pb-4 text-sm text-slate-700 sm:pb-5 ${subtle ? 'px-2 sm:px-3' : 'px-4 sm:px-5'}`}>{children}</div>}
+    </section>
+  );
+}
+
+function ExpandingTextarea({ value, onChange, id }: {
+  value: string;
+  onChange: (value: string) => void;
+  id: string;
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const field = ref.current;
+    if (!field) return;
+    field.style.height = 'auto';
+    field.style.height = `${Math.max(132, field.scrollHeight + 2)}px`;
+  }, [value]);
+  useEffect(() => {
+    const parent = ref.current?.parentElement;
+    if (!parent || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => {
+      const field = ref.current;
+      if (!field) return;
+      field.style.height = 'auto';
+      field.style.height = `${Math.max(132, field.scrollHeight + 2)}px`;
+    });
+    observer.observe(parent);
+    return () => observer.disconnect();
+  }, []);
+  return (
+    <textarea ref={ref} id={id} rows={4} value={value} onChange={(event) => onChange(event.target.value)}
+      className="block min-h-32 w-full resize-none overflow-hidden rounded-xl border border-emerald-200 bg-white px-4 py-3 text-base leading-7 text-slate-900 outline-none focus:border-emerald-600 focus:ring-2 focus:ring-emerald-100" />
+  );
+}
 
 const THAI_MONTHS = [
   'ม.ค.',
@@ -196,19 +248,6 @@ export default function SettingsPage() {
 
   const [savedBanner, setSavedBanner] = useState<string | null>(null);
   const [errorBanner, setErrorBanner] = useState<string | null>(null);
-
-  const insertLineVariable = (key: LineTemplateKey, variable: string) => {
-    const field = document.getElementById(`line-${key}`) as HTMLTextAreaElement | null;
-    const text = lineTemplates[key] ?? LINE_TEMPLATE_DEFINITIONS[key].value;
-    const start = field?.selectionStart ?? text.length;
-    const end = field?.selectionEnd ?? start;
-    const token = `{${variable}}`;
-    setLineTemplates((previous) => ({ ...previous, [key]: text.slice(0, start) + token + text.slice(end) }));
-    requestAnimationFrame(() => {
-      field?.focus();
-      field?.setSelectionRange(start + token.length, start + token.length);
-    });
-  };
 
   const fetchHolidays = useCallback(async () => {
     setLoadingHolidays(true);
@@ -784,7 +823,7 @@ export default function SettingsPage() {
                 {activeTab === 'shop' ? 'ข้อมูลร้าน' : activeTab === 'queue' ? 'คิวและการจอง' : 'แจ้งเตือนคิว'}
               </h2>
               {activeTab === 'notify' && <p className="text-xs text-slate-500">
-                กำหนดระยะคิวแจ้งเตือนผ่าน LINE และการเรียกคิวซ้ำอัตโนมัติ
+                ตั้งเวลาแจ้งเตือนและแก้ข้อความ LINE
               </p>}
             </div>
 
@@ -848,208 +887,92 @@ export default function SettingsPage() {
                 </div>
               )}
 
-              {activeTab === 'notify' && <><div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div>
-                  <label
-                    htmlFor="notify_ahead_first"
-                    className="block text-xs sm:text-sm font-bold text-slate-800"
-                  >
-                    เตือนล่วงหน้าครั้งที่ 1 (เหลือกี่คิว)
-                  </label>
-                  <input
-                    id="notify_ahead_first"
-                    type="number"
-                    min={2}
-                    max={20}
-                    value={form.notify_ahead_first}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        notify_ahead_first: Number(e.target.value),
-                      }))
-                    }
-                    className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor="notify_ahead_second"
-                    className="block text-xs sm:text-sm font-bold text-slate-800"
-                  >
-                    เตือนใกล้ถึงคิวครั้งที่ 2 (เหลือกี่คิว)
-                  </label>
-                  <input
-                    id="notify_ahead_second"
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={form.notify_ahead_second}
-                    onChange={(e) =>
-                      setForm((prev) => ({
-                        ...prev,
-                        notify_ahead_second: Number(e.target.value),
-                      }))
-                    }
-                    className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
-                  />
-                </div>
-              </div>
-
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label
-                      htmlFor="repeat_call_interval_sec"
-                      className="block text-xs sm:text-sm font-bold text-slate-800 flex items-center gap-1"
-                    >
-                      <Clock className="h-3.5 w-3.5 text-emerald-600" />
-                      <span>ระยะเวลาเรียกซ้ำ (วินาที)</span>
+              {activeTab === 'notify' && <div className="space-y-3">
+                <SettingsItem id="notify-ahead" title="เตือนก่อนถึงคิว" defaultOpen>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block font-medium">เตือนครั้งแรกเมื่อเหลือ
+                      <input id="notify_ahead_first" type="number" min={2} max={20} value={form.notify_ahead_first}
+                        onChange={(e) => setForm((prev) => ({ ...prev, notify_ahead_first: Number(e.target.value) }))}
+                        className="mt-2 block min-h-12 w-full rounded-xl border border-emerald-200 bg-white px-4 text-lg font-semibold text-slate-900" />
+                      <span className="mt-1 block text-xs text-slate-600">คิว</span>
                     </label>
-                    <input
-                      id="repeat_call_interval_sec"
-                      type="number"
-                      min={10}
-                      max={600}
-                      value={form.repeat_call_interval_sec}
-                      onChange={(e) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          repeat_call_interval_sec: Number(e.target.value),
-                        }))
-                      }
-                      className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
-                    />
-                  </div>
-
-                  <div>
-                    <label
-                      htmlFor="repeat_call_max_count"
-                      className="block text-xs sm:text-sm font-bold text-slate-800"
-                    >
-                      จำนวนครั้งเรียกซ้ำสูงสุด
+                    <label className="block font-medium">เตือนอีกครั้งเมื่อเหลือ
+                      <input id="notify_ahead_second" type="number" min={1} max={10} value={form.notify_ahead_second}
+                        onChange={(e) => setForm((prev) => ({ ...prev, notify_ahead_second: Number(e.target.value) }))}
+                        className="mt-2 block min-h-12 w-full rounded-xl border border-emerald-200 bg-white px-4 text-lg font-semibold text-slate-900" />
+                      <span className="mt-1 block text-xs text-slate-600">คิว</span>
                     </label>
-                    <input
-                      id="repeat_call_max_count"
-                      type="number"
-                      min={1}
-                      max={10}
-                      value={form.repeat_call_max_count}
-                      onChange={(e) =>
-                        setForm((prev) => ({
-                          ...prev,
-                          repeat_call_max_count: Number(e.target.value),
-                        }))
-                      }
-                      className="mt-1.5 w-full rounded-xl border border-slate-300 bg-white px-3.5 py-2.5 font-mono text-base font-bold text-slate-900 tabular-nums"
-                    />
                   </div>
-                </div>
-
-                {/* แจ้งเตือนช่างผ่าน LINE */}
-                <div className="rounded-xl border border-emerald-200 bg-emerald-50/60 p-3.5 space-y-2.5">
-                  <div className="flex items-center gap-2">
-                    <MessageCircle className="h-4 w-4 text-emerald-700 shrink-0" />
-                    <span className="text-xs sm:text-sm font-bold text-emerald-900">
-                      แจ้งเตือนช่างผ่าน LINE (ไม่บังคับ)
-                    </span>
-                  </div>
-                  <p className="text-xs text-emerald-800 leading-relaxed">
-                    เมื่อลูกค้าจองคิว LINE ระบบจะส่งข้อความแจ้งเตือนไปยังบัญชี LINE ส่วนตัวของช่างทันที
-                    ช่างต้องเพิ่มเพื่อน LINE OA ของร้านก่อนถึงจะรับข้อความได้
-                  </p>
-                  <div>
-                    <label
-                      htmlFor="barber_line_user_id"
-                      className="block text-xs font-bold text-emerald-900 mb-1.5"
-                    >
-                      LINE User ID ของช่าง
+                </SettingsItem>
+                <SettingsItem id="notify-recall" title="เรียกคิวซ้ำ">
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    <label className="block font-medium">ห่างกันกี่วินาที
+                      <input id="repeat_call_interval_sec" type="number" min={10} max={600} value={form.repeat_call_interval_sec}
+                        onChange={(e) => setForm((prev) => ({ ...prev, repeat_call_interval_sec: Number(e.target.value) }))}
+                        className="mt-2 block min-h-12 w-full rounded-xl border border-emerald-200 bg-white px-4 text-lg font-semibold text-slate-900" />
                     </label>
-                    <div className="relative">
-                      <input
-                        id="barber_line_user_id"
-                        type={showBarberUserId ? 'text' : 'password'}
-                        value={form.barber_line_user_id}
-                        onChange={(e) =>
-                          setForm((prev) => ({
-                            ...prev,
-                            barber_line_user_id: e.target.value,
-                          }))
-                        }
-                        placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
-                        className="w-full rounded-xl border border-emerald-300 bg-white px-3.5 py-2.5 pr-10 font-mono text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-600 focus:outline-none"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowBarberUserId((v) => !v)}
-                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700"
-                        aria-label={showBarberUserId ? 'ซ่อน User ID' : 'แสดง User ID'}
-                      >
-                        {showBarberUserId ? (
-                          <EyeOff className="h-4 w-4" />
-                        ) : (
-                          <Eye className="h-4 w-4" />
-                        )}
-                      </button>
-                    </div>
-                    <p className="mt-1.5 text-[11px] text-emerald-700">
-                      💡 วิธีหา LINE User ID: ให้ช่างเปิดแชท LINE OA ของร้าน แล้วพิมพ์คำว่า{' '}
-                      <strong className="underline font-bold">myid</strong> ส่งไป บอทจะตอบกลับรหัส User ID ทันที
-                      สามารถคัดลอกมาวางในช่องนี้ได้เลย
-                    </p>
+                    <label className="block font-medium">เรียกได้สูงสุดกี่ครั้ง
+                      <input id="repeat_call_max_count" type="number" min={1} max={10} value={form.repeat_call_max_count}
+                        onChange={(e) => setForm((prev) => ({ ...prev, repeat_call_max_count: Number(e.target.value) }))}
+                        className="mt-2 block min-h-12 w-full rounded-xl border border-emerald-200 bg-white px-4 text-lg font-semibold text-slate-900" />
+                    </label>
                   </div>
-                </div>
+                </SettingsItem>
+                <SettingsItem id="notify-barber" title="แจ้งเตือนช่าง">
+                  <p className="mb-3 text-sm">ลูกค้ารับคิวผ่าน LINE แล้วแจ้งช่างทันที</p>
+                  <label htmlFor="barber_line_user_id" className="block font-medium">LINE User ID ของช่าง</label>
+                  <div className="relative mt-2">
+                    <input id="barber_line_user_id" type={showBarberUserId ? 'text' : 'password'}
+                      value={form.barber_line_user_id} onChange={(e) => setForm((prev) => ({ ...prev, barber_line_user_id: e.target.value }))}
+                      placeholder="Uxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
+                      className="min-h-12 w-full rounded-xl border border-emerald-200 bg-white px-4 pr-12 font-mono text-base text-slate-900" />
+                    <button type="button" onClick={() => setShowBarberUserId((value) => !value)}
+                      className="absolute right-2 top-1/2 flex h-10 w-10 -translate-y-1/2 items-center justify-center text-slate-600"
+                      aria-label={showBarberUserId ? 'ซ่อน User ID' : 'แสดง User ID'}>
+                      {showBarberUserId ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                    </button>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-600">ให้ช่างพิมพ์ “myid” ในแชต LINE OA แล้วนำรหัสมาใส่</p>
+                </SettingsItem>
 
-                <div className="space-y-3 border-t border-slate-100 pt-5">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900">ข้อความ LINE OA ถึงลูกค้า</h3>
-                    <p className="mt-1 text-xs text-slate-500">เลือกหัวข้อเพื่อแก้ข้อความบนแชตและบัตรคิว แตะตัวแปรเพื่อแทรกค่าจริงตอนส่ง</p>
+                <div className="space-y-3 pt-2">
+                  <div className="px-1">
+                    <h3 className="text-base font-bold text-slate-900">ข้อความถึงลูกค้า</h3>
+                    <p className="mt-1 text-sm text-slate-600">เลือกหมวด แล้วแตะข้อความที่ต้องการแก้</p>
                   </div>
-                  {LINE_TEMPLATE_GROUPS.map((group) => (
-                    <details key={group.title} className="group overflow-hidden rounded-xl border border-slate-200 bg-white open:border-emerald-200">
-                      <summary className="flex min-h-12 cursor-pointer list-none items-center justify-between gap-3 px-4 py-3 text-sm font-bold text-slate-900 [&::-webkit-details-marker]:hidden">
-                        <span>{group.title} <span className="ml-1 font-normal text-slate-500">({group.keys.length})</span></span>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition-transform group-open:rotate-90" />
-                      </summary>
-                      <div className="space-y-5 border-t border-slate-100 bg-slate-50/50 p-3 sm:p-4">
-                        {group.keys.map((rawKey) => {
+                  {LINE_TEMPLATE_GROUPS.map((group, groupIndex) => (
+                    <SettingsItem key={group.title} id={`line-group-${groupIndex}`} subtle
+                      title={`${group.title} (${group.keys.length})`} defaultOpen={groupIndex === 0}>
+                      <div className="space-y-2.5">
+                        {group.keys.map((rawKey, itemIndex) => {
                           const key = rawKey as LineTemplateKey;
                           const definition = LINE_TEMPLATE_DEFINITIONS[key];
                           const current = lineTemplates[key] ?? definition.value;
                           return (
-                            <div key={key} className="rounded-xl border border-slate-200 bg-white p-3 sm:p-4">
-                              <div className="flex items-center justify-between gap-2">
-                                <label htmlFor={`line-${key}`} className="text-sm font-bold text-slate-800">{definition.label}</label>
-                                {lineTemplates[key] !== undefined && (
-                                  <button type="button" onClick={() => setLineTemplates((previous) => {
-                                    const next = { ...previous }; delete next[key]; return next;
-                                  })} className="shrink-0 text-xs font-semibold text-slate-500 underline hover:text-emerald-700">ค่าเดิม</button>
-                                )}
-                              </div>
-                              <textarea id={`line-${key}`} rows={definition.value.length > 100 ? 4 : 2}
+                            <SettingsItem key={key} id={`line-${key}-item`} title={definition.label}
+                              defaultOpen={groupIndex === 0 && itemIndex === 0}>
+                              <label htmlFor={`line-${key}`} className="mb-2 block text-xs font-semibold text-emerald-900">ข้อความที่ส่ง</label>
+                              <ExpandingTextarea id={`line-${key}`}
                                 value={current}
-                                onChange={(event) => setLineTemplates((previous) => ({ ...previous, [key]: event.target.value }))}
-                                className="mt-2 w-full resize-y rounded-lg border border-slate-300 bg-white px-3 py-2 text-base leading-relaxed text-slate-900 focus:border-emerald-600 focus:outline-none focus:ring-2 focus:ring-emerald-100"
-                                aria-describedby={`line-help-${key}`} />
-                              <div id={`line-help-${key}`} className="mt-2 flex flex-wrap items-center gap-1.5">
-                                {definition.variables.length ? definition.variables.map((variable) => (
-                                  <button key={variable} type="button" onClick={() => insertLineVariable(key, variable)} className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-1 font-mono text-xs text-emerald-800 hover:bg-emerald-100">
-                                    {`{${variable}}`}
-                                  </button>
-                                )) : <span className="text-xs text-slate-400">ไม่มีตัวแปร</span>}
+                                onChange={(value) => setLineTemplates((previous) => ({ ...previous, [key]: value }))} />
+                              {lineTemplates[key] !== undefined && (
+                                <button type="button" onClick={() => setLineTemplates((previous) => {
+                                  const next = { ...previous }; delete next[key]; return next;
+                                })} className="mt-2 text-xs font-semibold text-emerald-800 underline">คืนค่าเดิม</button>
+                              )}
+                              <div className="mt-4 rounded-xl border border-emerald-100 bg-white p-3.5">
+                                <p className="mb-2 text-xs font-semibold text-slate-600">ตัวอย่าง</p>
+                                <p className="whitespace-pre-wrap break-words text-sm leading-6 text-slate-900">{renderLineMessage({ [key]: current }, key, previewValues)}</p>
                               </div>
-                              <div className="mt-3 rounded-lg bg-slate-50 p-3">
-                                <p className="mb-1 text-[11px] font-bold text-slate-500">ตัวอย่างที่ลูกค้าจะเห็น</p>
-                                <p className="whitespace-pre-wrap break-words text-sm text-slate-800">{renderLineMessage({ [key]: current }, key, previewValues)}</p>
-                              </div>
-                            </div>
+                            </SettingsItem>
                           );
                         })}
                       </div>
-                    </details>
+                    </SettingsItem>
                   ))}
                 </div>
 
-              </>}
+              </div>}
               <div className="pt-2">
                 {activeTab === 'notify' && savedBanner && <p role="status" className="mb-3 text-center text-sm font-semibold text-emerald-700">{savedBanner}</p>}
                 {activeTab === 'notify' && errorBanner && <p role="alert" className="mb-3 text-center text-sm font-semibold text-rose-700">{errorBanner}</p>}
