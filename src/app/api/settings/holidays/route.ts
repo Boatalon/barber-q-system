@@ -9,13 +9,15 @@ import {
   removeShopHoliday,
 } from '@/lib/queue-service';
 
-import { getSupabase, getTodayDateString } from '@/lib/db';
+import { getSupabase } from '@/lib/db';
+import { getQueueBusinessDate } from '@/lib/booking-hours';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    const today = getTodayDateString();
+    const settings = await getSettings();
+    const today = getQueueBusinessDate(settings.booking_open_time, settings.booking_close_time ?? '20:00', new Date(), settings.accepting_override_until);
     if (req.nextUrl.searchParams.get('view') === 'calendar') {
       const { data, error } = await getSupabase().rpc('list_shop_holiday_dates');
       if (error) throw error;
@@ -33,7 +35,7 @@ export async function GET(req: NextRequest) {
       holidays,
       isShopClosedToday: Boolean(holiday),
       shopClosedReason: holiday?.reason ?? null,
-      settings: await getSettings(),
+      settings,
     });
   } catch (err) {
     console.error('[GET /api/settings/holidays Error]:', err);

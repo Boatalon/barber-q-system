@@ -48,11 +48,17 @@ create table if not exists public.shop_settings (
   daily_queue_limit integer default null,
   is_accepting_queue boolean not null default true,
   booking_open_time text not null default '08:30',
+  booking_close_time text not null default '20:00',
+  accepting_override_until timestamptz,
   updated_at timestamptz not null default now(),
   constraint shop_settings_daily_queue_limit_positive
     check (daily_queue_limit is null or daily_queue_limit between 1 and 999),
   constraint shop_settings_booking_open_time_format
-    check (booking_open_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$')
+    check (booking_open_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
+  constraint shop_settings_booking_close_time_format
+    check (booking_close_time ~ '^([01][0-9]|2[0-3]):[0-5][0-9]$'),
+  constraint shop_settings_booking_hours_order
+    check (booking_open_time <> booking_close_time)
 );
 
 insert into public.shop_settings (id)
@@ -107,14 +113,24 @@ returns trigger language plpgsql as $$
 declare
   limits public.shop_settings%rowtype;
   issued_count integer;
+  local_time time := (now() at time zone 'Asia/Bangkok')::time;
 begin
   perform pg_advisory_xact_lock(hashtext(new.queue_date::text));
   select * into limits from public.shop_settings where id = 1;
   if not limits.is_accepting_queue then
     raise exception 'QUEUE_NOT_ACCEPTING';
   end if;
-  if (now() at time zone 'Asia/Bangkok')::time < limits.booking_open_time::time then
-    raise exception 'BOOKING_NOT_OPEN_YET:%', limits.booking_open_time;
+  if limits.accepting_override_until is null or now() >= limits.accepting_override_until then
+    if limits.booking_open_time < limits.booking_close_time then
+      if local_time < limits.booking_open_time::time then
+        raise exception 'BOOKING_NOT_OPEN_YET:%', limits.booking_open_time;
+      end if;
+      if local_time >= limits.booking_close_time::time then
+        raise exception 'BOOKING_CLOSED_FOR_TODAY:%', limits.booking_close_time;
+      end if;
+    elsif local_time >= limits.booking_close_time::time and local_time < limits.booking_open_time::time then
+      raise exception 'BOOKING_CLOSED_FOR_TODAY:%', limits.booking_close_time;
+    end if;
   end if;
   if limits.daily_queue_limit is not null then
     select count(*) into issued_count from public.queues

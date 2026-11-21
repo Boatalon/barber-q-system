@@ -30,6 +30,16 @@ export async function PUT(req: NextRequest) {
     if (body.booking_open_time !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(body.booking_open_time)) {
       return NextResponse.json({ error: 'เวลาเปิดรับคิวไม่ถูกต้อง' }, { status: 400 });
     }
+    if (body.booking_close_time !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(body.booking_close_time)) {
+      return NextResponse.json({ error: 'เวลาปิดรับคิวไม่ถูกต้อง' }, { status: 400 });
+    }
+    if (body.booking_open_time !== undefined || body.booking_close_time !== undefined) {
+      const current = await getSettings();
+      if ((body.booking_open_time ?? current.booking_open_time) ===
+          (body.booking_close_time ?? current.booking_close_time ?? '20:00')) {
+        return NextResponse.json({ error: 'เวลาเปิดและปิดรับคิวต้องไม่ตรงกัน' }, { status: 400 });
+      }
+    }
     const settings = await updateSettings({
       shop_name: body.shop_name,
       notify_ahead_first:
@@ -54,8 +64,10 @@ export async function PUT(req: NextRequest) {
           : undefined,
       ...('barber_line_user_id' in body ? { barber_line_user_id: body.barber_line_user_id ?? null } : {}),
       daily_queue_limit: 'daily_queue_limit' in body ? (body.daily_queue_limit === null ? null : Number(body.daily_queue_limit)) : undefined,
-      is_accepting_queue: typeof body.is_accepting_queue === 'boolean' ? body.is_accepting_queue : undefined,
       booking_open_time: body.booking_open_time,
+      booking_close_time: body.booking_close_time,
+      ...((body.booking_open_time !== undefined || body.booking_close_time !== undefined)
+        ? { accepting_override_until: null } : {}),
     });
     const state = await getSystemQueueState();
     return NextResponse.json({

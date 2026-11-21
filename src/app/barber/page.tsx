@@ -345,8 +345,8 @@ export default function BarberControlPage() {
         setState(data.state);
         showToast(
           data.isAcceptingQueue
-            ? 'เปิดรับคิวใหม่แล้ว ✅'
-            : 'หยุดรับคิวใหม่แล้ว — ลูกค้า LINE ไม่สามารถจองได้ชั่วคราว 🔴',
+            ? 'เปิดรับคิวแล้ว'
+            : 'หยุดรับคิวแล้ว',
           data.isAcceptingQueue ? 'success' : 'warning'
         );
       } else {
@@ -369,14 +369,14 @@ export default function BarberControlPage() {
     state?.walkInWaitingQueues[state.walkInWaitingQueues.length - 1]
       ?.display_code ??
     '---';
-  // Manual pause is distinct from the scheduled opening hours.
-  const isAcceptingQueue = state?.settings?.is_accepting_queue ?? true;
+  const isAcceptingQueue = state?.isAcceptingQueue ?? true;
+  const isManuallyAccepting = state?.settings?.is_accepting_queue ?? true;
   const queueTimeStatus = state?.queueTimeStatus ?? 'OPEN';
   const dailyQueueCount = state?.dailyQueueCount ?? 0;
   const dailyQueueLimit = state?.dailyQueueLimit ?? null;
 
   return (
-    <div className="barber-page mx-auto w-full max-w-6xl px-4 pt-5 space-y-4 md:px-6 md:pt-8">
+    <div className="barber-page mx-auto w-full max-w-6xl space-y-3 px-3 pt-4 sm:px-4 md:space-y-4 md:px-6 md:pt-8">
       {/* แจ้งเตือนเมื่ออินเทอร์เน็ตหรือการเชื่อมต่อขัดข้อง */}
       {connectionError && (
         <div
@@ -417,26 +417,6 @@ export default function BarberControlPage() {
         </div>
       )}
 
-      {/* แบนเนอร์แจ้งเตือนเมื่อหยุดรับคิวชั่วคราว */}
-      {!isAcceptingQueue && (
-        <div
-          role="alert"
-          className="flex items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs font-bold text-rose-900"
-        >
-          <div className="flex items-center gap-2">
-            <PauseCircle className="h-4 w-4 text-rose-600 shrink-0" />
-            <span>ขณะนี้ <strong>หยุดรับคิวใหม่</strong> ทั้ง LINE และหน้าร้าน (ลูกค้าจองมาจะขึ้นว่าหยุดรับคิว)</span>
-          </div>
-          <button
-            onClick={handleToggleAccepting}
-            disabled={loadingToggle}
-            className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-700 shrink-0"
-          >
-            เปิดรับคิวใหม่
-          </button>
-        </div>
-      )}
-
       {/* แถบแจ้งผลการกดปุ่ม */}
       {toastMessage && (
         <div
@@ -463,31 +443,42 @@ export default function BarberControlPage() {
       )}
 
       {/* โซนที่ 1: สถานะคิวปัจจุบัน + จำนวนคิวรอ + ปุ่มเรียกซ้ำ (รวมอยู่ในกรอบเดียวสำหรับหน้าจอแนวตั้ง) */}
-      <section className="barber-status rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:p-6">
-        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 border-b border-slate-100 pb-3 mb-3">
-          <div className="min-w-0">
-            <h1 className="flex min-w-0 items-center gap-2 text-sm font-bold text-slate-800">
-              <img src="/signature-logo.png" alt="" className="h-9 w-9 shrink-0 rounded-md object-contain" />
-              <span>ซิกเนเจอร์ · คิววันนี้</span>
-            </h1>
-          </div>
-          {/* ปุ่มหยุด/เปิดรับคิว */}
+      <section className="barber-status rounded-2xl border border-slate-200 bg-white p-3 shadow-sm sm:p-4 md:rounded-3xl md:p-6">
+        <div className="mb-3 flex items-center justify-between gap-2 border-b border-slate-100 pb-3">
+          <h1 className="flex min-w-0 items-center gap-2 text-sm font-bold text-slate-800 sm:text-base">
+            <img src="/signature-logo.png" alt="" className="h-9 w-9 shrink-0 rounded-md object-contain" />
+            <span className="truncate">คิววันนี้</span>
+          </h1>
+          {/* สีและคำสั้น ๆ บอกสถานะ ปุ่มนี้ใช้เปลี่ยนสถานะรับคิว */}
           <button
             onClick={() => isAcceptingQueue ? setShowStopAcceptingModal(true) : handleToggleAccepting()}
-            disabled={loadingToggle}
-            className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm sm:px-5 sm:text-base font-bold transition-all shadow-sm disabled:opacity-50 ${
-              !isAcceptingQueue
-                ? 'border-rose-400 bg-rose-600 text-white hover:bg-rose-700 shadow-rose-200'
-                : 'border-emerald-300 bg-emerald-600 text-white hover:bg-emerald-700 shadow-emerald-200'
+            disabled={loadingToggle || state?.isShopClosedToday || (!isAcceptingQueue && queueTimeStatus !== 'OPEN')}
+            aria-label={state?.isShopClosedToday ? 'วันนี้ร้านหยุด' : isAcceptingQueue ? 'หยุดรับคิวใหม่' : queueTimeStatus === 'BEFORE_OPEN' ? 'ยังไม่เปิดรับคิว' : queueTimeStatus === 'AFTER_CLOSE' ? 'ปิดรับคิวตามเวลา' : 'เปิดรับคิวใหม่'}
+            aria-pressed={isAcceptingQueue}
+            className={`inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl px-3 text-sm font-bold text-white transition-colors disabled:opacity-70 sm:px-4 ${
+              !isAcceptingQueue && queueTimeStatus !== 'OPEN'
+                ? 'bg-slate-500'
+                : !isAcceptingQueue
+                ? 'bg-rose-600 hover:bg-rose-700'
+                : 'bg-emerald-600 hover:bg-emerald-700'
             }`}
           >
-            {!isAcceptingQueue ? (
-              <><PlayCircle className="h-5 w-5 shrink-0" /><span>🔴 หยุดรับคิวแล้ว (แตะเพื่อเปิดรับ)</span></>
+            {state?.isShopClosedToday ? (
+              <><PauseCircle className="h-4 w-4 shrink-0" /><span>วันหยุด</span></>
+            ) : isAcceptingQueue ? (
+              <><PauseCircle className="h-4 w-4 shrink-0" /><span>รับคิว</span></>
+            ) : !isManuallyAccepting && queueTimeStatus === 'OPEN' ? (
+              <><PlayCircle className="h-4 w-4 shrink-0" /><span>หยุดรับ</span></>
+            ) : queueTimeStatus === 'BEFORE_OPEN' ? (
+              <><Clock className="h-4 w-4 shrink-0" /><span>ยังไม่เปิด</span></>
+            ) : queueTimeStatus === 'AFTER_CLOSE' ? (
+              <><Clock className="h-4 w-4 shrink-0" /><span>ปิดตามเวลา</span></>
             ) : (
-              <><PauseCircle className="h-5 w-5 shrink-0" /><span>🟢 เปิดรับคิวอยู่ (กดหยุดรับ)</span></>
+              <><PlayCircle className="h-4 w-4 shrink-0" /><span>หยุดรับ</span></>
             )}
           </button>
-          <div className="col-span-2 flex items-center gap-2">
+        </div>
+        <div className="mb-3 flex items-center gap-2 border-b border-slate-100 pb-3">
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
               className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
@@ -518,7 +509,6 @@ export default function BarberControlPage() {
             >
               <RefreshCw className="h-4 w-4" />
             </button>
-          </div>
         </div>
 
         {/* แถวตัวเลขหลัก 3 ช่องในแนวตั้ง/แนวนอนที่ดูง่ายบนจอมือถือ */}
@@ -566,7 +556,7 @@ export default function BarberControlPage() {
                       state?.repeatStatus.maxCount ?? 3
                     } ครั้ง`
                   : 'ลูกค้าหน้าร้าน'
-                : 'ยังไม่มีคิวที่กำลังให้บริการ'}
+                : 'ยังไม่มีคิว'}
             </div>
           </div>
 
@@ -698,7 +688,7 @@ export default function BarberControlPage() {
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-100">
           <h2 className="text-sm font-bold text-slate-900">
-            คิวที่กำลังรอ ({totalWaiting})
+            คิวรอ ({totalWaiting})
           </h2>
           <div className="flex items-center gap-1.5 text-xs font-semibold">
             <span className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-2 py-0.5 text-amber-800 border border-amber-200">
@@ -790,7 +780,7 @@ export default function BarberControlPage() {
           </div>
         ) : (
           <div className="py-8 text-center text-xs sm:text-sm text-slate-400">
-            ยังไม่มีคิวที่กำลังรอในขณะนี้
+            ยังไม่มีคิวรอ
           </div>
         )}
       </section>
@@ -798,10 +788,7 @@ export default function BarberControlPage() {
       {/* โซนที่ 4: ลิ้นชักพับเก็บประวัติคิวและบันทึกแจ้งเตือน LINE เพื่อไม่ให้รกหน้าจอมือถือ */}
       <details className="group rounded-2xl border border-slate-200 bg-white shadow-sm">
         <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-3 text-xs sm:text-sm font-bold text-slate-700">
-          <span>
-            ประวัติคิววันนี้ & บันทึกการแจ้งเตือน LINE (
-            {state?.recentNotifications.length ?? 0})
-          </span>
+          <span>ประวัติและแจ้งเตือน ({state?.recentNotifications.length ?? 0})</span>
           <ChevronDown className="h-4 w-4 text-slate-400 transition-transform group-open:rotate-180" />
         </summary>
 
@@ -876,11 +863,11 @@ export default function BarberControlPage() {
       {showStopAcceptingModal && (
         <div role="dialog" aria-modal="true" aria-labelledby="accepting-dialog-title" className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4">
           <div className="w-full max-w-sm space-y-4 rounded-2xl bg-white p-5 shadow-xl">
-            <h2 id="accepting-dialog-title" className="text-lg font-bold text-slate-900">{isAcceptingQueue ? 'หยุดรับคิวใหม่?' : 'เปิดรับคิวใหม่?'}</h2>
-            <p className="text-sm text-slate-700">{isAcceptingQueue ? 'ลูกค้าจะจองคิวใหม่ผ่าน LINE และหน้าร้านไม่ได้ แต่คิวที่มีอยู่ยังให้บริการต่อได้' : 'ลูกค้าจะจองคิวใหม่ได้อีกครั้ง'}</p>
+            <h2 id="accepting-dialog-title" className="text-lg font-bold text-slate-900">หยุดรับคิว?</h2>
+            <p className="text-sm text-slate-700">LINE และหน้าร้านจะรับคิวใหม่ไม่ได้ คิวเดิมยังให้บริการต่อ</p>
             <div className="grid grid-cols-2 gap-2">
               <button onClick={() => setShowStopAcceptingModal(false)} className="min-h-11 rounded-xl border border-slate-300 font-bold">ยกเลิก</button>
-              <button onClick={handleToggleAccepting} disabled={loadingToggle} className="min-h-11 rounded-xl bg-rose-600 px-2 font-bold text-white disabled:opacity-50">{isAcceptingQueue ? 'ยืนยันหยุดรับ' : 'ยืนยันเปิดรับ'}</button>
+              <button onClick={handleToggleAccepting} disabled={loadingToggle} className="min-h-11 rounded-xl bg-rose-600 px-2 font-bold text-white disabled:opacity-50">หยุดรับคิว</button>
             </div>
           </div>
         </div>

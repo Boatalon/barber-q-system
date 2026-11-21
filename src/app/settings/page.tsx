@@ -24,7 +24,6 @@ import {
   Info,
   Sparkles,
   Check,
-  PlayCircle,
 } from 'lucide-react';
 import type { ShopHolidayRow, ShopSettings } from '@/lib/db';
 
@@ -136,11 +135,17 @@ export default function SettingsPage() {
     barber_line_user_id: '',
     daily_queue_limit: null as number | null,
     booking_open_time: '08:30',
-    is_accepting_queue: true,
+    booking_close_time: '20:00',
   });
 
   const [showBarberUserId, setShowBarberUserId] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [resumingQueue, setResumingQueue] = useState(false);
+  const [queueAvailability, setQueueAvailability] = useState<{
+    isAcceptingQueue: boolean;
+    queueTimeStatus: 'BEFORE_OPEN' | 'OPEN' | 'AFTER_CLOSE';
+    isShopClosedToday: boolean;
+  } | null>(null);
   const [resetting, setResetting] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
 
@@ -215,7 +220,7 @@ export default function SettingsPage() {
             barber_line_user_id: sData.settings.barber_line_user_id ?? '',
             daily_queue_limit: sData.settings.daily_queue_limit ?? null,
             booking_open_time: sData.settings.booking_open_time ?? '08:30',
-            is_accepting_queue: sData.settings.is_accepting_queue ?? true,
+            booking_close_time: sData.settings.booking_close_time ?? '20:00',
           });
         }
       }
@@ -226,6 +231,25 @@ export default function SettingsPage() {
   }, []);
 
   useEffect(() => { void fetchSettings(); }, [fetchSettings]);
+  const fetchQueueAvailability = useCallback(async () => {
+    try {
+      const res = await fetch('/api/queue/state', { cache: 'no-store' });
+      if (!res.ok) throw new Error('Queue state unavailable');
+      const state = await res.json();
+      setQueueAvailability({
+        isAcceptingQueue: state.isAcceptingQueue,
+        queueTimeStatus: state.queueTimeStatus,
+        isShopClosedToday: state.isShopClosedToday,
+      });
+    } catch {
+      setQueueAvailability(null);
+    }
+  }, []);
+  useEffect(() => {
+    void fetchQueueAvailability();
+    const interval = setInterval(() => { void fetchQueueAvailability(); }, 30_000);
+    return () => clearInterval(interval);
+  }, [fetchQueueAvailability]);
   useEffect(() => {
     if (activeTab === 'holiday') void fetchHolidays();
   }, [activeTab, fetchHolidays]);
@@ -302,7 +326,7 @@ export default function SettingsPage() {
         : activeTab === 'queue'
           ? {
             daily_queue_limit: form.daily_queue_limit, booking_open_time: form.booking_open_time,
-            is_accepting_queue: form.is_accepting_queue, walkin_popup_duration_sec: form.walkin_popup_duration_sec
+            booking_close_time: form.booking_close_time, walkin_popup_duration_sec: form.walkin_popup_duration_sec
           }
           : {
             notify_ahead_first: form.notify_ahead_first, notify_ahead_second: form.notify_ahead_second,
@@ -316,6 +340,7 @@ export default function SettingsPage() {
       });
       if (res.ok) {
         setSavedBanner('บันทึกการตั้งค่าเรียบร้อยแล้ว');
+        void fetchQueueAvailability();
         setTimeout(() => setSavedBanner(null), 4000);
       } else {
         const data = await res.json().catch(() => null);
@@ -328,28 +353,27 @@ export default function SettingsPage() {
     }
   };
 
-  // สลับสถานะเปิด/หยุดรับคิวทันที
-  const handleToggleAcceptingQueue = async () => {
-    setSaving(true);
+  const handleResumeQueue = async () => {
+    setResumingQueue(true);
     setErrorBanner(null);
-    const nextState = !form.is_accepting_queue;
     try {
       const res = await fetch('/api/queue/toggle-accepting', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isAcceptingQueue: nextState }),
+        body: JSON.stringify({ isAcceptingQueue: true }),
       });
-      if (res.ok) {
-        setForm((prev) => ({ ...prev, is_accepting_queue: nextState }));
-        setSavedBanner(nextState ? 'กลับมารับคิวใหม่เรียบร้อยแล้ว' : 'หยุดรับคิวชั่วคราวเรียบร้อยแล้ว');
-        setTimeout(() => setSavedBanner(null), 3500);
-      } else {
-        setErrorBanner('ไม่สามารถเปลี่ยนสถานะได้');
-      }
-    } catch {
-      setErrorBanner('การเชื่อมต่อขัดข้อง ไม่สามารถเปลี่ยนสถานะได้');
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'เปิดรับคิวไม่ได้');
+      setQueueAvailability({
+        isAcceptingQueue: data.state.isAcceptingQueue,
+        queueTimeStatus: data.state.queueTimeStatus,
+        isShopClosedToday: data.state.isShopClosedToday,
+      });
+      setSavedBanner('กลับมารับคิวแล้ว');
+    } catch (error) {
+      setErrorBanner(error instanceof Error ? error.message : 'เปิดรับคิวไม่ได้');
     } finally {
-      setSaving(false);
+      setResumingQueue(false);
     }
   };
 
@@ -791,47 +815,34 @@ export default function SettingsPage() {
                     onChange={(e) => setForm((prev) => ({ ...prev, booking_open_time: e.target.value }))}
                     className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
                 </label>
-                {/* ปุ่มสลับสถานะเปิด / หยุดรับคิว (LINE & หน้าร้าน) */}
-                <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 sm:col-span-2">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-bold text-slate-900">สถานะการรับคิว</p>
-                      <p className="text-xs text-slate-600 mt-0.5">
-                        {form.is_accepting_queue
-                          ? 'ขณะนี้ระบบเปิดให้ลูกค้าจองคิวผ่าน LINE และหน้าร้านได้ตามปกติ'
-                          : 'ขณะนี้ระบบปฏิเสธการจองคิว ลูกค้าที่กดจองมาจะได้รับข้อความว่าหยุดรับคิว'}
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={handleToggleAcceptingQueue}
-                      disabled={saving}
-                      className={`inline-flex min-h-12 shrink-0 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold shadow-sm transition-all ${
-                        form.is_accepting_queue
-                          ? 'border border-emerald-300 bg-emerald-600 text-white hover:bg-emerald-700'
-                          : 'border border-rose-400 bg-rose-600 text-white hover:bg-rose-700 shadow-rose-200'
-                      }`}
-                    >
-                      {form.is_accepting_queue ? (
-                        <>
-                          <Check className="h-4 w-4" />
-                          <span>🟢 เปิดรับคิวอยู่ (กดเพื่อหยุดรับ)</span>
-                        </>
-                      ) : (
-                        <>
-                          <PlayCircle className="h-4 w-4" />
-                          <span>🔴 หยุดรับคิวแล้ว (กดเพื่อเปิดรับ)</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
+                <label className="block text-sm font-bold text-slate-800">เวลาปิดรับคิวอัตโนมัติ
+                  <input type="time" value={form.booking_close_time}
+                    onChange={(e) => setForm((prev) => ({ ...prev, booking_close_time: e.target.value }))}
+                    className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
+                </label>
+                <p className="text-xs text-slate-500 sm:col-span-2">เวลาปิดก่อนเวลาเปิดได้ เช่น เปิด 08:30 ปิด 02:00 ของวันถัดไป</p>
                 <label className="block text-sm font-bold text-slate-800 sm:col-span-2">เวลาแสดงคิวหน้าร้านล่าสุด (วินาที)
                   <input type="number" min={3} max={30} value={form.walkin_popup_duration_sec}
                     onChange={(e) => setForm((prev) => ({ ...prev, walkin_popup_duration_sec: Number(e.target.value) }))}
                     className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
                 </label>
               </div>}
+
+              {activeTab === 'queue' && queueAvailability && !queueAvailability.isAcceptingQueue && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                  <p className="text-sm font-semibold text-amber-900">
+                    {queueAvailability.isShopClosedToday ? 'วันนี้เป็นวันหยุดร้าน' : 'ขณะนี้หยุดรับคิว'}
+                  </p>
+                  <button type="button" onClick={() => { void handleResumeQueue(); }}
+                    disabled={resumingQueue || queueAvailability.isShopClosedToday}
+                    className="min-h-11 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white hover:bg-emerald-700 disabled:opacity-50">
+                    {resumingQueue ? 'กำลังเปิดรับ...' : 'กลับมารับคิว'}
+                  </button>
+                  {queueAvailability.queueTimeStatus !== 'OPEN' && !queueAvailability.isShopClosedToday && (
+                    <p className="w-full text-xs text-amber-800">รับคิวต่อได้จนถึงเวลาเปิดรอบถัดไป</p>
+                  )}
+                </div>
+              )}
 
               {activeTab === 'notify' && <><div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div>

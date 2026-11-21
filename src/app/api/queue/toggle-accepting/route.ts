@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getSystemQueueState, updateSettings } from '@/lib/queue-service';
+import { getSettings, getSystemQueueState, updateSettings } from '@/lib/queue-service';
+import { getBookingTimeStatus, getNextOpeningIso } from '@/lib/booking-hours';
 
 export async function POST(req: NextRequest) {
   try {
@@ -7,9 +8,16 @@ export async function POST(req: NextRequest) {
     if (typeof body.isAcceptingQueue !== 'boolean') {
       return NextResponse.json({ error: 'สถานะรับคิวไม่ถูกต้อง' }, { status: 400 });
     }
-    const settings = await updateSettings({ is_accepting_queue: body.isAcceptingQueue });
+    const current = await getSettings();
+    const afterHours = getBookingTimeStatus(current.booking_open_time, current.booking_close_time ?? '20:00') !== 'OPEN';
+    const settings = await updateSettings({
+      is_accepting_queue: body.isAcceptingQueue,
+      accepting_override_until: body.isAcceptingQueue && afterHours
+        ? getNextOpeningIso(current.booking_open_time)
+        : null,
+    });
     const state = await getSystemQueueState();
-    return NextResponse.json({ isAcceptingQueue: settings.is_accepting_queue, state });
+    return NextResponse.json({ isAcceptingQueue: state.isAcceptingQueue, state });
   } catch (error) {
     console.error('[toggle-accepting]', error);
     return NextResponse.json({ error: 'เปลี่ยนสถานะรับคิวไม่ได้' }, { status: 500 });

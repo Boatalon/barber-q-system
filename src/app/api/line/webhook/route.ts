@@ -6,9 +6,9 @@ import {
   cancelLineQueue,
   getLineUserQueueStatus,
   getSettings,
-  isBeforeBookingOpenTime,
   isShopClosedToday,
 } from '@/lib/queue-service';
+import { getBookingTimeStatus, isBookingOpen } from '@/lib/booking-hours';
 import {
   buildQueueFlexMessage,
   getLineClient,
@@ -112,8 +112,10 @@ export async function POST(req: NextRequest) {
           });
         } else if (!settings.is_accepting_queue) {
           replyMessages.push({ type: 'text', text: 'ขณะนี้ร้านหยุดรับคิวใหม่ชั่วคราวครับ' });
-        } else if (isBeforeBookingOpenTime(settings.booking_open_time)) {
+        } else if (!isBookingOpen(settings) && getBookingTimeStatus(settings.booking_open_time, settings.booking_close_time ?? '20:00') === 'BEFORE_OPEN') {
           replyMessages.push({ type: 'text', text: `เปิดรับคิวเวลา ${settings.booking_open_time} น. ครับ` });
+        } else if (!isBookingOpen(settings)) {
+          replyMessages.push({ type: 'text', text: `วันนี้ปิดรับคิวแล้วครับ พรุ่งนี้เปิดเวลา ${settings.booking_open_time} น.` });
         } else {
           replyMessages.push({
             type: 'text',
@@ -155,6 +157,7 @@ export async function POST(req: NextRequest) {
             const message = error instanceof Error ? error.message : '';
             if (message === 'QUEUE_NOT_ACCEPTING') replyMessages.push({ type: 'text', text: 'ขณะนี้ร้านหยุดรับคิวใหม่ชั่วคราวครับ' });
             else if (message.startsWith('BOOKING_NOT_OPEN_YET:')) replyMessages.push({ type: 'text', text: `เปิดรับคิวเวลา ${message.split(':').slice(1).join(':')} น. ครับ` });
+            else if (message.startsWith('BOOKING_CLOSED_FOR_TODAY:')) replyMessages.push({ type: 'text', text: `วันนี้ปิดรับคิวเวลา ${message.split(':').slice(1).join(':')} น. แล้วครับ พรุ่งนี้เปิดเวลา ${settings.booking_open_time} น.` });
             else if (message.startsWith('DAILY_LIMIT_REACHED:')) replyMessages.push({ type: 'text', text: `วันนี้คิวเต็มแล้ว (ครบ ${message.split(':')[1]} คิว) ขอบคุณที่สนใจร้าน ${settings.shop_name} ครับ` });
             else throw error;
           }

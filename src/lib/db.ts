@@ -38,6 +38,8 @@ export interface ShopSettings {
   daily_queue_limit: number | null;   // null = unlimited
   is_accepting_queue: boolean;        // true = accepting new queues
   booking_open_time: string;          // e.g. "08:30" (HH:mm, ICT)
+  booking_close_time: string;         // e.g. "20:00" (HH:mm, ICT)
+  accepting_override_until: string | null;
 }
 
 export interface ShopHolidayRow {

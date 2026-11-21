@@ -1,7 +1,6 @@
 import {
   formatQueueCode,
   getSupabase,
-  getTodayDateString,
   type NotificationLogRow,
   type QueueRow,
   type ShopHolidayRow,
@@ -13,6 +12,7 @@ import {
   isLineConfigured,
   sendLineNotification,
 } from './line';
+import { getBookingTimeStatus, getQueueBusinessDate, isBookingOpen, type BookingTimeStatus } from './booking-hours';
 
 export interface EnrichedQueueItem extends QueueRow {
   queuesAhead: number;
@@ -63,7 +63,7 @@ export interface SystemQueueState {
     maxCount: number;
   };
   isAcceptingQueue: boolean;
-  queueTimeStatus: 'BEFORE_OPEN' | 'OPEN';
+  queueTimeStatus: BookingTimeStatus;
   dailyQueueCount: number;
   dailyQueueLimit: number | null;
 }
@@ -98,6 +98,8 @@ export async function getSettings(): Promise<ShopSettings> {
     daily_queue_limit: null,
     is_accepting_queue: true,
     booking_open_time: '08:30',
+    booking_close_time: '20:00',
+    accepting_override_until: null,
   };
 
   const { error: insertError } = await supabase.from('shop_settings').upsert(fallback);
@@ -121,6 +123,8 @@ export async function updateSettings(
       | 'daily_queue_limit'
       | 'is_accepting_queue'
       | 'booking_open_time'
+      | 'booking_close_time'
+      | 'accepting_override_until'
     >
   >
 ): Promise<ShopSettings> {
@@ -138,6 +142,8 @@ export async function updateSettings(
     ...(input.daily_queue_limit !== undefined ? { daily_queue_limit: input.daily_queue_limit === null ? null : Math.max(1, Math.min(999, Math.floor(input.daily_queue_limit))) } : {}),
     ...(typeof input.is_accepting_queue === 'boolean' ? { is_accepting_queue: input.is_accepting_queue } : {}),
     ...(typeof input.booking_open_time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(input.booking_open_time) ? { booking_open_time: input.booking_open_time } : {}),
+    ...(typeof input.booking_close_time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(input.booking_close_time) ? { booking_close_time: input.booking_close_time } : {}),
+    ...('accepting_override_until' in input ? { accepting_override_until: input.accepting_override_until ?? null } : {}),
     updated_at: new Date().toISOString(),
   };
 
@@ -151,17 +157,17 @@ export async function updateSettings(
   return data as ShopSettings;
 }
 
-/**
- * ตรวจสอบว่าเวลาปัจจุบัน (ICT/UTC+7) ยังอยู่ก่อนเวลาเปิดรับจอง
- */
-function getBangkokTimeString(): string {
-  const bangkokMs = Date.now() + 7 * 60 * 60 * 1000;
-  const d = new Date(bangkokMs);
-  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+async function getCurrentQueueDate(): Promise<string> {
+  const settings = await getSettings();
+  return getQueueBusinessDate(settings.booking_open_time, settings.booking_close_time ?? '20:00', new Date(), settings.accepting_override_until);
 }
 
-export function isBeforeBookingOpenTime(openTime: string): boolean {
-  return getBangkokTimeString() < openTime;
+function assertAcceptingQueue(settings: ShopSettings): void {
+  if (!settings.is_accepting_queue) throw new Error('QUEUE_NOT_ACCEPTING');
+  if (isBookingOpen(settings)) return;
+  const status = getBookingTimeStatus(settings.booking_open_time, settings.booking_close_time ?? '20:00');
+  if (status === 'BEFORE_OPEN') throw new Error('BOOKING_NOT_OPEN_YET:' + settings.booking_open_time);
+  throw new Error('BOOKING_CLOSED_FOR_TODAY:' + settings.booking_close_time);
 }
 
 /**
@@ -186,7 +192,7 @@ export async function isShopClosedToday(): Promise<{
   reason: string | null;
 }> {
   const supabase = getSupabase();
-  const today = getTodayDateString();
+  const today = await getCurrentQueueDate();
   const { data: holiday, error } = await supabase
     .from('shop_holidays')
     .select('reason')
@@ -256,7 +262,7 @@ export async function openShopToday(options?: {
   broadcast?: boolean;
   broadcastMessage?: string;
 }): Promise<{ success: boolean; broadcastSent: boolean }> {
-  const today = getTodayDateString();
+  const today = await getCurrentQueueDate();
 
   await removeShopHoliday(today);
 
@@ -277,7 +283,7 @@ export async function closeShopToday(options?: {
   broadcast?: boolean;
   broadcastMessage?: string;
 }): Promise<{ success: boolean; broadcastSent: boolean }> {
-  const today = getTodayDateString();
+  const today = await getCurrentQueueDate();
   await addShopHolidays([today], options?.reason || 'วันหยุดประจำร้าน');
 
   let broadcastSent = false;
@@ -293,12 +299,13 @@ export async function closeShopToday(options?: {
  * คำนวณจำนวนคิวที่เหลืออยู่ข้างหน้าสำหรับคิวแต่ละรายการ
  */
 export async function getActiveQueuesWithPosition(
-  today = getTodayDateString()
+  today?: string
 ): Promise<{
   serving: EnrichedQueueItem | null;
   waiting: EnrichedQueueItem[];
 }> {
   const supabase = getSupabase();
+  today ??= await getCurrentQueueDate();
   const { data } = await supabase
     .from('queues')
     .select('*')
@@ -349,11 +356,12 @@ export async function cleanupOldQueueData(): Promise<{
   return { cutoffIso };
 }
 
-/** ปิดคิวค้างของวันก่อนหลังเที่ยงคืนตามเวลาไทย โดยเก็บประวัติไว้ */
+/** ปิดคิวของรอบก่อนหลังเริ่มรอบใหม่ โดยเก็บประวัติไว้ */
 export async function resetPreviousDayQueues(): Promise<{ closedCount: number }> {
   const supabase = getSupabase();
-  const today = getTodayDateString();
-  const todayStartIso = new Date(`${today}T00:00:00+07:00`).toISOString();
+  const settings = await getSettings();
+  const today = getQueueBusinessDate(settings.booking_open_time, settings.booking_close_time ?? '20:00', new Date(), settings.accepting_override_until);
+  const todayStartIso = new Date(`${today}T${settings.booking_open_time}:00+07:00`).toISOString();
   const { data, error } = await supabase
     .from('queues')
     .update({ status: 'CANCELLED', closed_at: new Date().toISOString() })
@@ -374,7 +382,7 @@ export async function resetPreviousDayQueues(): Promise<{ closedCount: number }>
  * ตรวจสอบและส่งแจ้งเตือนอัตโนมัติเมื่อจำนวนคิวข้างหน้าตรงตามเกณฑ์ (เช่น เหลือ 3 คิว, 2 คิว, 1 คิว)
  */
 export async function evaluateQueueNotifications(
-  today = getTodayDateString(),
+  today?: string,
   preloaded?: {
     settings: ShopSettings;
     serving: EnrichedQueueItem | null;
@@ -382,6 +390,7 @@ export async function evaluateQueueNotifications(
   }
 ): Promise<NotificationLogRow[]> {
   const supabase = getSupabase();
+  today ??= await getCurrentQueueDate();
   const [settings, { serving, waiting }] = preloaded
     ? [
         preloaded.settings,
@@ -497,7 +506,7 @@ export async function evaluateQueueNotifications(
  */
 export async function processDueRepeatCalls(): Promise<NotificationLogRow | null> {
   const supabase = getSupabase();
-  const today = getTodayDateString();
+  const today = await getCurrentQueueDate();
   const [settings, { serving }] = await Promise.all([
     getSettings(),
     getActiveQueuesWithPosition(today),
@@ -567,19 +576,12 @@ export async function addWalkInQueue(): Promise<{
   totalWaiting: number;
 }> {
   const supabase = getSupabase();
-  const today = getTodayDateString();
+  const today = await getCurrentQueueDate();
 
   const [settings, holiday] = await Promise.all([getSettings(), isShopClosedToday()]);
   if (holiday.isClosed) throw new Error('SHOP_CLOSED');
 
-  // Check is_accepting_queue
-  if (!settings.is_accepting_queue) {
-    throw new Error('QUEUE_NOT_ACCEPTING');
-  }
-  // Check booking_open_time
-  if (isBeforeBookingOpenTime(settings.booking_open_time)) {
-    throw new Error('BOOKING_NOT_OPEN_YET:' + settings.booking_open_time);
-  }
+  assertAcceptingQueue(settings);
   // Check daily_queue_limit
   if (settings.daily_queue_limit !== null) {
     const count = await getTodayQueueCount(today);
@@ -639,7 +641,7 @@ export async function bookLineQueue(
   currentServingCode: string | null;
 }> {
   const supabase = getSupabase();
-  const today = getTodayDateString();
+  const today = await getCurrentQueueDate();
   const [settings, { serving, waiting }] = await Promise.all([
     getSettings(),
     getActiveQueuesWithPosition(today),
@@ -657,10 +659,7 @@ export async function bookLineQueue(
     };
   }
 
-  if (!settings.is_accepting_queue) throw new Error('QUEUE_NOT_ACCEPTING');
-  if (isBeforeBookingOpenTime(settings.booking_open_time)) {
-    throw new Error('BOOKING_NOT_OPEN_YET:' + settings.booking_open_time);
-  }
+  assertAcceptingQueue(settings);
   if (settings.daily_queue_limit !== null) {
     const count = await getTodayQueueCount(today);
     if (count >= settings.daily_queue_limit) {
@@ -778,7 +777,7 @@ export async function getLineUserQueueStatus(lineUserId: string): Promise<{
   shopName: string;
 }> {
   const supabase = getSupabase();
-  const today = getTodayDateString();
+  const today = await getCurrentQueueDate();
   const [settings, { serving, waiting }, { data: lastRow }] = await Promise.all([
     getSettings(),
     getActiveQueuesWithPosition(today),
@@ -815,7 +814,7 @@ export async function cancelLineQueue(lineUserId: string): Promise<{
   reason?: string;
 }> {
   const supabase = getSupabase();
-  const today = getTodayDateString();
+  const today = await getCurrentQueueDate();
   const settings = await getSettings();
 
   const { data: target } = await supabase
@@ -886,7 +885,7 @@ export async function cancelQueueById(
   reason?: string;
 }> {
   const supabase = getSupabase();
-  const today = getTodayDateString();
+  const today = await getCurrentQueueDate();
   const [settings, { serving: prevServing, waiting: prevWaiting }] =
     await Promise.all([getSettings(), getActiveQueuesWithPosition(today)]);
 
@@ -1009,7 +1008,7 @@ export async function advanceToNextQueue(): Promise<{
   notifyPromise?: Promise<unknown>;
 }> {
   const supabase = getSupabase();
-  const today = getTodayDateString();
+  const today = await getCurrentQueueDate();
   const [settings, { serving: currentServing, waiting: prevWaiting }] =
     await Promise.all([getSettings(), getActiveQueuesWithPosition(today)]);
   const nowIso = new Date().toISOString();
@@ -1084,7 +1083,7 @@ export async function manualRecallCurrentQueue(): Promise<{
   notifyPromise?: Promise<unknown>;
 }> {
   const supabase = getSupabase();
-  const today = getTodayDateString();
+  const today = await getCurrentQueueDate();
   const [settings, { serving }] = await Promise.all([
     getSettings(),
     getActiveQueuesWithPosition(today),
@@ -1142,7 +1141,7 @@ export async function manualRecallCurrentQueue(): Promise<{
  */
 export async function resetTodayQueues(): Promise<void> {
   const supabase = getSupabase();
-  const today = getTodayDateString();
+  const today = await getCurrentQueueDate();
   await Promise.all([
     supabase.from('queues').delete().eq('queue_date', today),
     supabase
@@ -1161,18 +1160,17 @@ export async function resetTodayQueues(): Promise<void> {
  */
 export async function getSystemQueueState(): Promise<SystemQueueState> {
   const supabase = getSupabase();
-  const today = getTodayDateString();
-  const todayStartIso = new Date(`${today}T00:00:00+07:00`).toISOString();
+  const settings = await getSettings();
+  const today = getQueueBusinessDate(settings.booking_open_time, settings.booking_close_time ?? '20:00', new Date(), settings.accepting_override_until);
+  const todayStartIso = new Date(`${today}T${settings.booking_open_time}:00+07:00`).toISOString();
 
   const [
-    settings,
     { serving, waiting },
     { data: recentHistoryData },
     { data: lastRowData },
     { data: recentNotificationsData },
     { data: holidayData, error: holidayError },
   ] = await Promise.all([
-    getSettings(),
     getActiveQueuesWithPosition(today),
     supabase
       .from('queues')
@@ -1305,6 +1303,11 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
     };
   }
 
+  const queueTimeStatus = getBookingTimeStatus(
+    settings.booking_open_time,
+    settings.booking_close_time ?? '20:00'
+  );
+
   return {
     todayDate: today,
     currentServing: serving,
@@ -1322,10 +1325,8 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
     isShopClosedToday,
     shopClosedReason,
     repeatStatus,
-    isAcceptingQueue: Boolean(settings.is_accepting_queue) &&
-      !isBeforeBookingOpenTime(settings.booking_open_time),
-    queueTimeStatus: isBeforeBookingOpenTime(settings.booking_open_time)
-      ? 'BEFORE_OPEN' : 'OPEN',
+    isAcceptingQueue: !isShopClosedToday && isBookingOpen(settings),
+    queueTimeStatus,
     dailyQueueLimit: settings.daily_queue_limit ?? null,
     dailyQueueCount: settings.daily_queue_limit === null ? 0 : await getTodayQueueCount(today),
   };
