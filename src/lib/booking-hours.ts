@@ -50,6 +50,26 @@ export function getNextOpeningIso(openTime: string, now: Date = new Date()): str
   return opening.toISOString();
 }
 
+/** Pausing new bookings must not change the date of queues already in progress. */
+export function getQueueToggleSettings(
+  settings: {
+    booking_open_time: string;
+    booking_close_time: string;
+    accepting_override_until: string | null;
+  },
+  isAcceptingQueue: boolean,
+  now: Date = new Date()
+): { is_accepting_queue: boolean; accepting_override_until: string | null } {
+  return {
+    is_accepting_queue: isAcceptingQueue,
+    accepting_override_until: !isAcceptingQueue
+      ? settings.accepting_override_until
+      : getBookingTimeStatus(settings.booking_open_time, settings.booking_close_time, now) === 'OPEN'
+        ? null
+        : getNextOpeningIso(settings.booking_open_time, now),
+  };
+}
+
 export function isBookingOpen(settings: {
   booking_open_time: string;
   booking_close_time: string;

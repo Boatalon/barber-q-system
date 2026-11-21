@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { getBangkokTimeString, getBookingTimeStatus, getNextOpeningIso, getQueueBusinessDate, isBookingOpen } from '../src/lib/booking-hours.ts';
+import { getBangkokTimeString, getBookingTimeStatus, getNextOpeningIso, getQueueBusinessDate, getQueueToggleSettings, isBookingOpen } from '../src/lib/booking-hours.ts';
 
 test('both booking channels share the exact Bangkok opening and closing boundaries', () => {
   const cases = [
@@ -57,4 +57,22 @@ test('daytime close override cannot carry into tomorrow night', () => {
     booking_open_time: '08:30', booking_close_time: '20:00',
     is_accepting_queue: true, accepting_override_until: until,
   }, new Date('2026-11-22T14:00:00Z')), false);
+});
+
+test('pausing after midnight keeps the pending queues in the same session', () => {
+  const afterMidnight = new Date('2026-11-21T17:30:00Z'); // 00:30 Bangkok
+  const current = {
+    booking_open_time: '08:30', booking_close_time: '20:00',
+    is_accepting_queue: true,
+    accepting_override_until: '2026-11-22T01:30:00.000Z',
+  };
+  const dateBefore = getQueueBusinessDate(current.booking_open_time, current.booking_close_time, afterMidnight, current.accepting_override_until);
+  const paused = { ...current, ...getQueueToggleSettings(current, false, afterMidnight) };
+  assert.equal(isBookingOpen(paused, afterMidnight), false);
+  assert.equal(getQueueBusinessDate(paused.booking_open_time, paused.booking_close_time, afterMidnight, paused.accepting_override_until), dateBefore);
+  assert.equal(dateBefore, '2026-11-21');
+
+  const resumed = { ...paused, ...getQueueToggleSettings(paused, true, afterMidnight) };
+  assert.equal(isBookingOpen(resumed, afterMidnight), true);
+  assert.equal(getQueueBusinessDate(resumed.booking_open_time, resumed.booking_close_time, afterMidnight, resumed.accepting_override_until), dateBefore);
 });
