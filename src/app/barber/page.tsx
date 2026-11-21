@@ -13,7 +13,6 @@ import {
   Volume2,
   VolumeX,
   RefreshCw,
-  Monitor,
   Clock,
   ChevronDown,
   AlertCircle,
@@ -26,6 +25,7 @@ import {
   announceQueueCall,
   announceQueueSkipped,
   announceWalkInAdded,
+  speakThai,
 } from '@/lib/speech';
 
 export default function BarberControlPage() {
@@ -195,7 +195,9 @@ export default function BarberControlPage() {
     isMutatingRef.current = true;
 
     if (soundEnabled) {
-      announceQueueCall(currentCode);
+      void announceQueueCall(currentCode).then((played) => {
+        if (!played) showToast('เบราว์เซอร์ไม่สามารถพูดภาษาไทยได้ ตรวจสอบเสียงพูดภาษาไทยในเครื่อง', 'warning');
+      });
     }
 
     try {
@@ -367,7 +369,9 @@ export default function BarberControlPage() {
     state?.walkInWaitingQueues[state.walkInWaitingQueues.length - 1]
       ?.display_code ??
     '---';
-  const isAcceptingQueue = state?.isAcceptingQueue ?? true;
+  // Manual pause is distinct from the scheduled opening hours.
+  const isAcceptingQueue = state?.settings?.is_accepting_queue ?? true;
+  const queueTimeStatus = state?.queueTimeStatus ?? 'OPEN';
   const dailyQueueCount = state?.dailyQueueCount ?? 0;
   const dailyQueueLimit = state?.dailyQueueLimit ?? null;
 
@@ -414,7 +418,7 @@ export default function BarberControlPage() {
       )}
 
       {/* แบนเนอร์แจ้งเตือนเมื่อหยุดรับคิวชั่วคราว */}
-      {!isAcceptingQueue && (
+      {!isAcceptingQueue && queueTimeStatus === 'OPEN' && (
         <div
           role="alert"
           className="flex items-center justify-between gap-2 rounded-xl border border-orange-200 bg-orange-50 px-3.5 py-2.5 text-xs font-bold text-orange-900"
@@ -459,58 +463,63 @@ export default function BarberControlPage() {
 
       {/* โซนที่ 1: สถานะคิวปัจจุบัน + จำนวนคิวรอ + ปุ่มเรียกซ้ำ (รวมอยู่ในกรอบเดียวสำหรับหน้าจอแนวตั้ง) */}
       <section className="barber-status rounded-3xl border border-slate-200 bg-white p-4 shadow-sm md:p-6">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5 mb-3">
-          <h1 className="flex min-w-0 items-center gap-2 text-sm font-bold text-slate-800">
-            <img src="/signature-logo.png" alt="" className="h-9 w-9 rounded-md object-contain" />
-            <span>ซิกเนเจอร์ · คิววันนี้</span>
-          </h1>
+        <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-3 border-b border-slate-100 pb-3 mb-3">
+          <div className="min-w-0">
+            <h1 className="flex min-w-0 items-center gap-2 text-sm font-bold text-slate-800">
+              <img src="/signature-logo.png" alt="" className="h-9 w-9 shrink-0 rounded-md object-contain" />
+              <span>ซิกเนเจอร์ · คิววันนี้</span>
+            </h1>
+          </div>
           {/* ปุ่มหยุด/เปิดรับคิว */}
           <button
             onClick={() => isAcceptingQueue ? setShowStopAcceptingModal(true) : handleToggleAccepting()}
-            disabled={loadingToggle}
-            className={`inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-bold transition-colors disabled:opacity-50 ${
-              isAcceptingQueue
+            disabled={loadingToggle || queueTimeStatus !== 'OPEN'}
+            className={`inline-flex min-h-14 items-center justify-center gap-2 rounded-xl border px-3 py-2 text-sm sm:px-5 sm:text-base font-bold transition-colors disabled:opacity-50 ${
+              queueTimeStatus !== 'OPEN'
+                ? 'border-slate-200 bg-slate-100 text-slate-600'
+                : isAcceptingQueue
                 ? 'border-orange-200 bg-orange-50 text-orange-700 hover:bg-orange-100'
                 : 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100'
             }`}
           >
-            {isAcceptingQueue ? (
-              <><PauseCircle className="h-3.5 w-3.5" /><span>หยุดรับคิว</span></>
+            {queueTimeStatus !== 'OPEN' ? (
+              <><Clock className="h-5 w-5 shrink-0" /><span>{queueTimeStatus === 'BEFORE_OPEN' ? 'ยังไม่เปิดรับคิว' : 'หมดเวลารับคิว'}</span></>
+            ) : isAcceptingQueue ? (
+              <><PauseCircle className="h-5 w-5 shrink-0" /><span>หยุดรับคิว</span></>
             ) : (
-              <><PlayCircle className="h-3.5 w-3.5" /><span>เปิดรับคิว</span></>
+              <><PlayCircle className="h-5 w-5 shrink-0" /><span>เปิดรับคิว</span></>
             )}
           </button>
-          <div className="flex w-full items-center justify-end gap-1.5 sm:w-auto">
+          <div className="col-span-2 flex items-center gap-2">
             <button
               onClick={() => setSoundEnabled(!soundEnabled)}
-              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              className="inline-flex min-h-10 items-center gap-1.5 rounded-lg border border-slate-200 px-2.5 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
             >
               {soundEnabled ? (
-                <>
-                  <Volume2 className="h-3.5 w-3.5 text-emerald-600" />
-                  <span>เสียงเปิด</span>
-                </>
+                <><Volume2 className="h-4 w-4 text-emerald-600" /><span>เสียงเปิด</span></>
               ) : (
-                <>
-                  <VolumeX className="h-3.5 w-3.5 text-slate-400" />
-                  <span>ปิดเสียง</span>
-                </>
+                <><VolumeX className="h-4 w-4 text-slate-400" /><span>ปิดเสียง</span></>
               )}
             </button>
-            <Link
-              href="/display"
-              target="_blank"
-              className="inline-flex items-center gap-1 rounded-lg bg-slate-900 px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-slate-800"
+            <button
+              onClick={() => {
+                void speakThai('ทดสอบเสียงเรียกคิว').then((started) => {
+                  showToast(
+                    started ? 'เริ่มเสียงทดสอบแล้ว' : 'มือถือพูดภาษาไทยไม่ได้ ตรวจสอบเสียงพูดภาษาไทยในเครื่อง',
+                    started ? 'info' : 'warning'
+                  );
+                });
+              }}
+              className="min-h-10 rounded-lg border border-slate-200 px-2.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
             >
-              <Monitor className="h-3.5 w-3.5" />
-              <span>จอร้าน</span>
-            </Link>
+              ทดสอบเสียง
+            </button>
             <button
               onClick={fetchState}
               aria-label="รีเฟรชข้อมูลคิว"
-              className="rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+              className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 hover:text-slate-800"
             >
-              <RefreshCw className="h-3.5 w-3.5" />
+              <RefreshCw className="h-4 w-4" />
             </button>
           </div>
         </div>
@@ -548,7 +557,7 @@ export default function BarberControlPage() {
 
             <div
               aria-live="polite"
-              className="my-1 font-mono text-6xl sm:text-7xl font-black tracking-wider text-emerald-400 tabular-nums"
+              className="my-1 font-mono text-[clamp(3.75rem,15vw,6rem)] leading-none font-black tracking-tight text-emerald-400 tabular-nums"
             >
               {currentServingCode}
             </div>
@@ -571,7 +580,7 @@ export default function BarberControlPage() {
                 คิวที่รอ
               </span>
               <div className="flex items-baseline gap-1.5">
-                <span className="font-mono text-3xl font-black text-slate-900 tabular-nums">
+                <span className="font-mono text-4xl sm:text-5xl font-black text-slate-900 tabular-nums">
                   {String(totalWaiting).padStart(2, '0')}
                 </span>
                 <span className="text-xs font-semibold text-slate-500">คิว</span>
@@ -595,7 +604,7 @@ export default function BarberControlPage() {
                   </span>
                 )}
               </div>
-              <span className="font-mono text-2xl sm:text-3xl font-black text-amber-600 tabular-nums">
+              <span className="font-mono text-3xl sm:text-4xl font-black text-amber-600 tabular-nums">
                 {latestWalkInCode}
               </span>
             </div>

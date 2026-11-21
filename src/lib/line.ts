@@ -6,9 +6,9 @@ export function isLineConfigured(): boolean {
   const secret = process.env.LINE_CHANNEL_SECRET;
   return Boolean(
     token &&
-      secret &&
-      token !== 'your_line_channel_access_token_here' &&
-      secret !== 'your_line_channel_secret_here'
+    secret &&
+    token !== 'your_line_channel_access_token_here' &&
+    secret !== 'your_line_channel_secret_here'
   );
 }
 
@@ -51,21 +51,21 @@ export function buildQueueFlexMessage(
   const statusBadgeColor = isServing
     ? '#16a34a'
     : isWaiting
-    ? '#2563eb'
-    : isCancelled
-    ? '#dc2626'
-    : '#64748b';
+      ? '#2563eb'
+      : isCancelled
+        ? '#dc2626'
+        : '#64748b';
   const statusText =
     statusTextOverride ??
     (isServing
       ? 'ถึงคิวของคุณแล้ว! เชิญที่เก้าอี้ตัดผม'
       : isWaiting
-      ? queuesAhead === 0
-        ? 'คุณคือคิวแรก รอช่างกดเริ่มคิว'
-        : `รออีก ${queuesAhead} คิวก่อนถึงลำดับของคุณ`
-      : isCancelled
-      ? 'ยกเลิกคิวแล้ว'
-      : 'ให้บริการเสร็จสิ้น');
+        ? queuesAhead === 0
+          ? 'คุณคือคิวแรก รอช่างกดเริ่มคิว'
+          : `รออีก ${queuesAhead} คิวก่อนถึงลำดับของคุณ`
+        : isCancelled
+          ? 'ยกเลิกคิวแล้ว'
+          : 'ให้บริการเสร็จสิ้น');
 
   const footerContents: messagingApi.FlexComponent[] = [];
 
@@ -208,18 +208,27 @@ export function buildQueueFlexMessage(
               },
             ],
           },
+          ...((isWaiting || isServing) ? [{
+            type: 'text' as const,
+            text: ' **กรุณามาถึงร้านภายใน 10 นาทีเมื่อถึงคิว มิฉะนั้นทางร้านขอสงวนสิทธิ์เรียกคิวถัดไป!!',
+            color: '#ff0000ff',
+            size: 'sm' as const,
+            weight: 'bold' as const,
+            wrap: true,
+            align: 'center' as const,
+          }] : []),
         ],
       },
       ...(footerContents.length > 0
         ? {
-            footer: {
-              type: 'box',
-              layout: 'vertical',
-              spacing: 'sm',
-              paddingAll: '16px',
-              contents: footerContents,
-            },
-          }
+          footer: {
+            type: 'box',
+            layout: 'vertical',
+            spacing: 'sm',
+            paddingAll: '16px',
+            contents: footerContents,
+          },
+        }
         : {}),
     },
   };

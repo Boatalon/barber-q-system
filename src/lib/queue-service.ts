@@ -63,6 +63,7 @@ export interface SystemQueueState {
     maxCount: number;
   };
   isAcceptingQueue: boolean;
+  queueTimeStatus: 'BEFORE_OPEN' | 'AFTER_CLOSE' | 'OPEN';
   dailyQueueCount: number;
   dailyQueueLimit: number | null;
 }
@@ -97,6 +98,7 @@ export async function getSettings(): Promise<ShopSettings> {
     daily_queue_limit: null,
     is_accepting_queue: true,
     booking_open_time: '08:30',
+    booking_close_time: '20:00',
   };
 
   const { error: insertError } = await supabase.from('shop_settings').upsert(fallback);
@@ -120,6 +122,7 @@ export async function updateSettings(
       | 'daily_queue_limit'
       | 'is_accepting_queue'
       | 'booking_open_time'
+      | 'booking_close_time'
     >
   >
 ): Promise<ShopSettings> {
@@ -137,6 +140,7 @@ export async function updateSettings(
     ...(input.daily_queue_limit !== undefined ? { daily_queue_limit: input.daily_queue_limit === null ? null : Math.max(1, Math.min(999, Math.floor(input.daily_queue_limit))) } : {}),
     ...(typeof input.is_accepting_queue === 'boolean' ? { is_accepting_queue: input.is_accepting_queue } : {}),
     ...(typeof input.booking_open_time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(input.booking_open_time) ? { booking_open_time: input.booking_open_time } : {}),
+    ...(typeof input.booking_close_time === 'string' && /^([01]\d|2[0-3]):[0-5]\d$/.test(input.booking_close_time) ? { booking_close_time: input.booking_close_time } : {}),
     updated_at: new Date().toISOString(),
   };
 
@@ -151,16 +155,20 @@ export async function updateSettings(
 }
 
 /**
- * ตรวจสอบว่าเวลาปัจจุบัน (ICT/UTC+7) ยังอยู่ก่อนเวลาเปิดรับจอง
+ * ตรวจสอบเวลาเปิดและหยุดรับคิวตามเวลาไทย (ICT/UTC+7)
  */
-export function isBeforeBookingOpenTime(openTime: string): boolean {
+function getBangkokTimeString(): string {
   const bangkokMs = Date.now() + 7 * 60 * 60 * 1000;
   const d = new Date(bangkokMs);
-  const h = d.getUTCHours();
-  const m = d.getUTCMinutes();
-  const [oh, om] = openTime.split(':').map(Number);
-  if (!Number.isInteger(oh) || !Number.isInteger(om)) return false;
-  return h < oh || (h === oh && m < om);
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}`;
+}
+
+export function isBeforeBookingOpenTime(openTime: string): boolean {
+  return getBangkokTimeString() < openTime;
+}
+
+export function isAtOrAfterBookingCloseTime(closeTime: string): boolean {
+  return getBangkokTimeString() >= closeTime;
 }
 
 /**
@@ -346,6 +354,27 @@ export async function cleanupOldQueueData(): Promise<{
   ]);
 
   return { cutoffIso };
+}
+
+/** ปิดคิวค้างของวันก่อนหลังเที่ยงคืนตามเวลาไทย โดยเก็บประวัติไว้ */
+export async function resetPreviousDayQueues(): Promise<{ closedCount: number }> {
+  const supabase = getSupabase();
+  const today = getTodayDateString();
+  const todayStartIso = new Date(`${today}T00:00:00+07:00`).toISOString();
+  const { data, error } = await supabase
+    .from('queues')
+    .update({ status: 'CANCELLED', closed_at: new Date().toISOString() })
+    .lt('queue_date', today)
+    .in('status', ['WAITING', 'SERVING'])
+    .select('id');
+  if (error) throw error;
+  const { error: settingsError } = await supabase
+    .from('shop_settings')
+    .update({ last_walkin_display_code: null, last_walkin_created_at: null })
+    .eq('id', 1)
+    .lt('last_walkin_created_at', todayStartIso);
+  if (settingsError) throw settingsError;
+  return { closedCount: data?.length ?? 0 };
 }
 
 /**
@@ -558,6 +587,9 @@ export async function addWalkInQueue(): Promise<{
   if (isBeforeBookingOpenTime(settings.booking_open_time)) {
     throw new Error('BOOKING_NOT_OPEN_YET:' + settings.booking_open_time);
   }
+  if (isAtOrAfterBookingCloseTime(settings.booking_close_time ?? '20:00')) {
+    throw new Error('BOOKING_CLOSED_FOR_TODAY:' + (settings.booking_close_time ?? '20:00'));
+  }
   // Check daily_queue_limit
   if (settings.daily_queue_limit !== null) {
     const count = await getTodayQueueCount(today);
@@ -638,6 +670,9 @@ export async function bookLineQueue(
   if (!settings.is_accepting_queue) throw new Error('QUEUE_NOT_ACCEPTING');
   if (isBeforeBookingOpenTime(settings.booking_open_time)) {
     throw new Error('BOOKING_NOT_OPEN_YET:' + settings.booking_open_time);
+  }
+  if (isAtOrAfterBookingCloseTime(settings.booking_close_time ?? '20:00')) {
+    throw new Error('BOOKING_CLOSED_FOR_TODAY:' + (settings.booking_close_time ?? '20:00'));
   }
   if (settings.daily_queue_limit !== null) {
     const count = await getTodayQueueCount(today);
@@ -1078,10 +1113,11 @@ export async function manualRecallCurrentQueue(): Promise<{
   const nextCallCount = serving.call_count + 1;
   const nowIso = new Date().toISOString();
 
-  await supabase
+  const { error: recallError } = await supabase
     .from('queues')
     .update({ call_count: nextCallCount, last_called_at: nowIso })
     .eq('id', serving.id);
+  if (recallError) throw recallError;
 
   if (serving.source === 'LINE' && serving.line_user_id) {
     const msg = `📢 เรียกคิวซ้ำ (ครั้งที่ ${nextCallCount}): ถึงคิวหมายเลข ${serving.display_code} แล้วครับ กรุณาเข้ารับบริการที่ร้าน`;
@@ -1139,6 +1175,7 @@ export async function resetTodayQueues(): Promise<void> {
 export async function getSystemQueueState(): Promise<SystemQueueState> {
   const supabase = getSupabase();
   const today = getTodayDateString();
+  const todayStartIso = new Date(`${today}T00:00:00+07:00`).toISOString();
 
   const [
     settings,
@@ -1167,6 +1204,7 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
     supabase
       .from('notification_logs')
       .select('*')
+      .gte('created_at', todayStartIso)
       .order('id', { ascending: false })
       .limit(25),
     supabase
@@ -1228,16 +1266,20 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
   const recentHistory = (recentHistoryData as QueueRow[]) ?? [];
   const recentNotifications =
     (recentNotificationsData as NotificationLogRow[]) ?? [];
+  const isWalkInFromToday = Boolean(
+    settings.last_walkin_created_at &&
+    new Date(settings.last_walkin_created_at).getTime() >= new Date(todayStartIso).getTime()
+  );
 
   let walkInPopup: WalkInPopupState = {
     active: false,
-    displayCode: settings.last_walkin_display_code,
+    displayCode: isWalkInFromToday ? settings.last_walkin_display_code : null,
     waitingCount: waiting.length,
-    createdAt: settings.last_walkin_created_at,
+    createdAt: isWalkInFromToday ? settings.last_walkin_created_at : null,
     expiresAtMs: null,
   };
 
-  if (settings.last_walkin_display_code && settings.last_walkin_created_at) {
+  if (settings.last_walkin_display_code && settings.last_walkin_created_at && isWalkInFromToday) {
     const createdMs = new Date(settings.last_walkin_created_at).getTime();
     const expiresAtMs = createdMs + settings.walkin_popup_duration_sec * 1000;
     if (Date.now() < expiresAtMs) {
@@ -1293,7 +1335,13 @@ export async function getSystemQueueState(): Promise<SystemQueueState> {
     isShopClosedToday,
     shopClosedReason,
     repeatStatus,
-    isAcceptingQueue: settings.is_accepting_queue ?? true,
+    isAcceptingQueue: Boolean(settings.is_accepting_queue) &&
+      !isBeforeBookingOpenTime(settings.booking_open_time) &&
+      !isAtOrAfterBookingCloseTime(settings.booking_close_time ?? '20:00'),
+    queueTimeStatus: isBeforeBookingOpenTime(settings.booking_open_time)
+      ? 'BEFORE_OPEN'
+      : isAtOrAfterBookingCloseTime(settings.booking_close_time ?? '20:00')
+        ? 'AFTER_CLOSE' : 'OPEN',
     dailyQueueLimit: settings.daily_queue_limit ?? null,
     dailyQueueCount: settings.daily_queue_limit === null ? 0 : await getTodayQueueCount(today),
   };

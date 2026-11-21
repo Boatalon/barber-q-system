@@ -3,6 +3,10 @@
   "regions": ["sin1"],
   "crons": [
     {
+      "path": "/api/cron/daily-queue-reset",
+      "schedule": "0 17 * * *"
+    },
+    {
       "path": "/api/queue/cleanup",
       "schedule": "0 0 1 * *"
     },

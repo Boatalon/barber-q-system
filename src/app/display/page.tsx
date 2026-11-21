@@ -17,15 +17,19 @@ import {
   announceQueueCall,
   announceQueueSkipped,
   announceWalkInAdded,
+  speakThai,
 } from '@/lib/speech';
 
 export default function ShopDisplayPage() {
   const [state, setState] = useState<SystemQueueState | null>(null);
-  const [soundEnabled, setSoundEnabled] = useState(true);
+  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [speechError, setSpeechError] = useState(false);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const isFirstFetchRef = useRef<boolean>(true);
   const prevServingRef = useRef<string | null>(null);
+  const prevServingIdRef = useRef<number | null>(null);
+  const prevCallCountRef = useRef<number>(0);
   const prevWalkInCreatedRef = useRef<string | null>(null);
   const prevCancelledIdRef = useRef<number | null>(null);
 
@@ -37,6 +41,8 @@ export default function ShopDisplayPage() {
       setState(data);
 
       const newServingCode = data.currentServing?.display_code ?? null;
+      const newServingId = data.currentServing?.id ?? null;
+      const newCallCount = data.currentServing?.call_count ?? 0;
       const newWalkInCreated = data.walkInPopup?.createdAt ?? null;
       const newWalkInCode = data.walkInPopup?.displayCode ?? null;
       const latestCancelled =
@@ -52,19 +58,27 @@ export default function ShopDisplayPage() {
             newServingCode !== prevServingRef.current ? newServingCode : null
           );
         } else if (
+          newServingCode &&
+          newServingId === prevServingIdRef.current &&
+          newCallCount > prevCallCountRef.current
+        ) {
+          announceQueueCall(newServingCode);
+        } else if (
           data.walkInPopup?.active &&
           newWalkInCreated &&
           newWalkInCode &&
           newWalkInCreated !== prevWalkInCreatedRef.current
         ) {
           announceWalkInAdded(newWalkInCode);
-        } else if (newServingCode && newServingCode !== prevServingRef.current) {
+        } else if (newServingCode && newServingId !== prevServingIdRef.current) {
           announceQueueCall(newServingCode);
         }
       }
 
       isFirstFetchRef.current = false;
       prevServingRef.current = newServingCode;
+      prevServingIdRef.current = newServingId;
+      prevCallCountRef.current = newCallCount;
       prevWalkInCreatedRef.current = newWalkInCreated;
       prevCancelledIdRef.current = latestCancelled?.id ?? null;
     } catch (err) {
@@ -86,6 +100,19 @@ export default function ShopDisplayPage() {
       document.exitFullscreen().catch(() => {});
       setIsFullscreen(false);
     }
+  };
+
+  const toggleSound = () => {
+    if (soundEnabled) {
+      setSoundEnabled(false);
+      return;
+    }
+    setSpeechError(false);
+    // เรียกจากการแตะโดยตรงเพื่อปลดล็อก Web Speech บน Chrome มือถือ
+    void speakThai('ทดสอบเสียงเรียกคิว').then((started) => {
+      setSpeechError(!started);
+      setSoundEnabled(started);
+    });
   };
 
   const currentCode = state?.currentServing?.display_code ?? '---';
@@ -126,8 +153,8 @@ export default function ShopDisplayPage() {
             <span className="hidden sm:inline">หน้าคุมคิว</span>
           </Link>
           <button
-            onClick={() => setSoundEnabled(!soundEnabled)}
-            aria-label={soundEnabled ? 'ปิดเสียง' : 'เปิดเสียง'}
+            onClick={toggleSound}
+            aria-label={soundEnabled ? 'ปิดเสียง' : 'แตะเปิดเสียงและทดสอบ'}
             className="inline-flex min-h-11 items-center gap-1.5 rounded-xl border border-slate-700 bg-slate-900 px-3 py-1.5 text-xs font-bold text-slate-200 hover:bg-slate-800"
           >
             {soundEnabled ? (
@@ -138,7 +165,7 @@ export default function ShopDisplayPage() {
             ) : (
               <>
                 <VolumeX className="h-3.5 w-3.5 text-slate-500" />
-                <span className="hidden sm:inline">ปิดเสียง</span>
+                <span className="hidden sm:inline">แตะเปิดเสียง</span>
               </>
             )}
           </button>
@@ -162,6 +189,12 @@ export default function ShopDisplayPage() {
           </button>
         </div>
       </div>
+
+      {speechError && (
+        <p role="alert" className="rounded-lg bg-rose-950 px-3 py-2 text-center text-xs font-semibold text-rose-100">
+          เครื่องนี้ไม่สามารถพูดภาษาไทยได้ กรุณาติดตั้งเสียงภาษาไทยในระบบแปลงข้อความเป็นเสียงพูดของโทรศัพท์
+        </p>
+      )}
 
       {/* พื้นที่แสดงผลหลัก (ไม่ใช้หน้าจอ Takeover เต็มจอ แสดงคิวปัจจุบัน + คิวรอ + คิวหน้าร้านล่าสุดพร้อมกัน) */}
       <div className="shop-display-main w-full flex-1 flex flex-col justify-center min-h-0">

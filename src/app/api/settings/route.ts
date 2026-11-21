@@ -28,7 +28,17 @@ export async function PUT(req: NextRequest) {
       return NextResponse.json({ error: 'จำนวนคิวสูงสุดต้องอยู่ระหว่าง 1 ถึง 999' }, { status: 400 });
     }
     if (body.booking_open_time !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(body.booking_open_time)) {
-      return NextResponse.json({ error: 'เวลาเปิดรับจองไม่ถูกต้อง' }, { status: 400 });
+      return NextResponse.json({ error: 'เวลาเปิดรับคิวไม่ถูกต้อง' }, { status: 400 });
+    }
+    if (body.booking_close_time !== undefined && !/^([01]\d|2[0-3]):[0-5]\d$/.test(body.booking_close_time)) {
+      return NextResponse.json({ error: 'เวลาหยุดรับคิวไม่ถูกต้อง' }, { status: 400 });
+    }
+    if (body.booking_open_time !== undefined || body.booking_close_time !== undefined) {
+      const current = await getSettings();
+      if ((body.booking_open_time ?? current.booking_open_time) >=
+          (body.booking_close_time ?? current.booking_close_time ?? '20:00')) {
+        return NextResponse.json({ error: 'เวลาหยุดรับคิวต้องช้ากว่าเวลาเปิดรับคิว' }, { status: 400 });
+      }
     }
     const settings = await updateSettings({
       shop_name: body.shop_name,
@@ -56,6 +66,7 @@ export async function PUT(req: NextRequest) {
       daily_queue_limit: 'daily_queue_limit' in body ? (body.daily_queue_limit === null ? null : Number(body.daily_queue_limit)) : undefined,
       is_accepting_queue: typeof body.is_accepting_queue === 'boolean' ? body.is_accepting_queue : undefined,
       booking_open_time: body.booking_open_time,
+      booking_close_time: body.booking_close_time,
     });
     const state = await getSystemQueueState();
     return NextResponse.json({

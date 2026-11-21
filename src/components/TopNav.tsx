@@ -5,7 +5,7 @@ import Image from 'next/image';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Scissors, Monitor, Settings, ChevronDown } from 'lucide-react';
+import { Scissors, Monitor, Settings, ChevronDown, ChevronUp } from 'lucide-react';
 
 export default function TopNav() {
   const pathname = usePathname();
@@ -82,9 +82,9 @@ export default function TopNav() {
             type="button"
             onClick={() => setIsVisible(true)}
             aria-label="เปิดแถบเมนูด้านบน"
-            className="flex h-3.5 items-center justify-center rounded-b-lg bg-slate-900/20 px-3 text-slate-600 hover:bg-slate-900/40 hover:text-white transition-colors"
+            className="flex h-6 w-14 items-center justify-center rounded-b-xl bg-slate-200 text-slate-600 shadow-sm hover:bg-slate-300 transition-colors"
           >
-            <ChevronDown className="h-3 w-3" />
+            <ChevronDown className="h-4 w-4" />
           </button>
         )}
       </div>
@@ -109,7 +109,7 @@ export default function TopNav() {
             className="flex items-center gap-2 shrink-0 text-slate-900"
           >
             <Image src="/signature-logo.png" alt="ซิกเนเจอร์" width={36} height={36} className="h-9 w-9 object-contain" />
-            <span className="text-sm sm:text-base font-bold tracking-tight">
+            <span className="hidden sm:inline text-base font-bold tracking-tight">
               คิวร้านตัดผม
             </span>
           </Link>
@@ -139,6 +139,19 @@ export default function TopNav() {
             })}
           </nav>
         </div>
+        {isVisible && (
+          <button
+            type="button"
+            onClick={() => {
+              clearHideTimer();
+              setIsVisible(false);
+            }}
+            aria-label="พับเก็บแถบเมนู"
+            className="absolute left-1/2 top-full flex h-6 w-14 -translate-x-1/2 items-center justify-center rounded-b-xl bg-slate-200 text-slate-600 shadow-sm hover:bg-slate-300"
+          >
+            <ChevronUp className="h-4 w-4" />
+          </button>
+        )}
       </header>
     </>
   );

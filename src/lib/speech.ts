@@ -1,6 +1,16 @@
 'use client';
 
 let cachedVoices: SpeechSynthesisVoice[] = [];
+let audioContext: AudioContext | null = null;
+
+function getAudioContext(): AudioContext | null {
+  if (typeof window === 'undefined') return null;
+  const AudioCtx = window.AudioContext ||
+    (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AudioCtx) return null;
+  audioContext ??= new AudioCtx();
+  return audioContext;
+}
 
 if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
   const loadVoices = () => {
@@ -28,12 +38,9 @@ export function formatQueueNumberForSpeech(displayCode: string): string {
 export function playChime(freq = 880, durationMs = 110) {
   if (typeof window === 'undefined') return;
   try {
-    const AudioCtx =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext })
-        .webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
+    const ctx = getAudioContext();
+    if (!ctx) return;
+    void ctx.resume().catch(() => {});
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'sine';
@@ -55,50 +62,52 @@ export function playChime(freq = 880, durationMs = 110) {
 /**
  * พูดข้อความภาษาไทยผ่าน Web Speech API (SpeechSynthesis)
  */
-export function speakThai(text: string) {
+export function speakThai(text: string): Promise<boolean> {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
-    playChime(880, 160);
-    return;
+    return Promise.resolve(false);
   }
 
-  try {
-    window.speechSynthesis.cancel();
+  return new Promise((resolve) => {
+    try {
+      const synth = window.speechSynthesis;
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'th-TH';
+      utterance.rate = 0.95;
+      utterance.volume = 1;
 
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'th-TH';
-    utterance.rate = 0.95;
-    utterance.pitch = 1.0;
-    utterance.volume = 1.0;
+      const voices = cachedVoices.length ? cachedVoices : synth.getVoices();
+      const thaiVoice = voices.find((voice) => voice.lang.toLowerCase().replace('_', '-').startsWith('th'));
+      if (thaiVoice) utterance.voice = thaiVoice;
 
-    const voices =
-      cachedVoices.length > 0
-        ? cachedVoices
-        : window.speechSynthesis.getVoices();
+      let settled = false;
+      const finish = (started: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        resolve(started);
+      };
+      const timeout = setTimeout(() => finish(false), 6000);
+      utterance.onstart = () => finish(true);
+      utterance.onerror = () => finish(false);
 
-    const thaiVoice =
-      voices.find(
-        (v) =>
-          v.lang.toLowerCase() === 'th-th' || v.lang.toLowerCase() === 'th_th'
-      ) || voices.find((v) => v.lang.toLowerCase().startsWith('th'));
-
-    if (thaiVoice) {
-      utterance.voice = thaiVoice;
+      // ไม่สั่ง cancel ทุกครั้ง เพราะบางเบราว์เซอร์หยุดเสียงใหม่ทันทีหลัง cancel
+      if (synth.speaking || synth.pending) synth.cancel();
+      synth.speak(utterance);
+      if (synth.paused) synth.resume();
+    } catch {
+      resolve(false);
     }
-
-    window.speechSynthesis.speak(utterance);
-  } catch {
-    playChime(880, 160);
-  }
+  });
 }
 
 /**
  * เสียงประกาศเมื่อเรียกคิวถัดไป หรือกดเรียกคิวซ้ำ:
  * "คิวที่ ..."
  */
-export function announceQueueCall(displayCode: string) {
+export async function announceQueueCall(displayCode: string): Promise<boolean> {
   const num = formatQueueNumberForSpeech(displayCode);
   playChime(784, 90);
-  speakThai(`คิวที่ ${num}`);
+  return speakThai(`คิวที่ ${num}`);
 }
 
 /**

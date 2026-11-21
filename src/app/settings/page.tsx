@@ -135,6 +135,7 @@ export default function SettingsPage() {
     barber_line_user_id: '',
     daily_queue_limit: null as number | null,
     booking_open_time: '08:30',
+    booking_close_time: '20:00',
     is_accepting_queue: true,
   });
 
@@ -214,6 +215,7 @@ export default function SettingsPage() {
             barber_line_user_id: sData.settings.barber_line_user_id ?? '',
             daily_queue_limit: sData.settings.daily_queue_limit ?? null,
             booking_open_time: sData.settings.booking_open_time ?? '08:30',
+            booking_close_time: sData.settings.booking_close_time ?? '20:00',
             is_accepting_queue: sData.settings.is_accepting_queue ?? true,
           });
         }
@@ -301,6 +303,7 @@ export default function SettingsPage() {
         : activeTab === 'queue'
           ? {
             daily_queue_limit: form.daily_queue_limit, booking_open_time: form.booking_open_time,
+            booking_close_time: form.booking_close_time,
             is_accepting_queue: form.is_accepting_queue, walkin_popup_duration_sec: form.walkin_popup_duration_sec
           }
           : {
@@ -537,14 +540,14 @@ export default function SettingsPage() {
         ตั้งค่าร้าน
       </h1>
       <div className="grid gap-4 md:grid-cols-[180px_minmax(0,1fr)]">
-        <nav aria-label="หมวดการตั้งค่า" className="flex gap-2 overflow-x-auto pb-1 md:flex-col md:overflow-visible">
+        <nav aria-label="หมวดการตั้งค่า" className="grid grid-cols-2 gap-2 md:flex md:flex-col">
           {([
             ['shop', 'เกี่ยวกับร้านค้า'], ['queue', 'คิวและการจอง'],
             ['notify', 'การแจ้งเตือน'], ['holiday', 'เลือกวันหยุด'],
           ] as const).map(([id, label]) => (
             <button key={id} type="button" onClick={() => setActiveTab(id)}
               aria-current={activeTab === id ? 'page' : undefined}
-              className={`min-h-11 shrink-0 rounded-xl px-4 text-left text-sm font-bold ${activeTab === id ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 hover:bg-slate-100'}`}>
+              className={`min-h-11 min-w-0 rounded-xl px-2 py-2 text-center text-xs font-bold sm:text-sm md:px-4 md:text-left ${activeTab === id ? 'bg-slate-900 text-white' : 'bg-white text-slate-700 hover:bg-slate-100'}`}>
               {label}
             </button>
           ))}
@@ -760,9 +763,14 @@ export default function SettingsPage() {
                     onChange={(e) => setForm((prev) => ({ ...prev, daily_queue_limit: e.target.value === '' ? null : Number(e.target.value) }))}
                     className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
                 </label>
-                <label className="block text-sm font-bold text-slate-800">เวลาเปิดรับจอง
+                <label className="block text-sm font-bold text-slate-800">เวลาเปิดรับคิว
                   <input type="time" value={form.booking_open_time}
                     onChange={(e) => setForm((prev) => ({ ...prev, booking_open_time: e.target.value }))}
+                    className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
+                </label>
+                <label className="block text-sm font-bold text-slate-800">เวลาหยุดรับคิวอัตโนมัติ
+                  <input type="time" value={form.booking_close_time}
+                    onChange={(e) => setForm((prev) => ({ ...prev, booking_close_time: e.target.value }))}
                     className="mt-1.5 w-full rounded-xl border border-slate-300 px-3.5 py-2.5 text-base" />
                 </label>
                 <label className="flex min-h-11 items-center gap-3 text-sm font-bold text-slate-800 sm:col-span-2">
@@ -943,7 +951,7 @@ export default function SettingsPage() {
           </section>}
 
           {/* รีเซ็ตคิวเริ่มวันใหม่ */}
-          {activeTab === 'holiday' && <section className="rounded-2xl border border-rose-200 bg-rose-50/60 p-4 sm:p-5">
+          {activeTab === 'queue' && <section className="rounded-2xl border border-rose-200 bg-rose-50/60 p-4 sm:p-5">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <h2 className="text-sm font-bold text-rose-900 flex items-center gap-1.5">
@@ -951,7 +959,7 @@ export default function SettingsPage() {
                   <span>รีเซ็ตคิวทั้งหมดของวันนี้</span>
                 </h2>
                 <p className="mt-0.5 text-xs text-rose-700">
-                  ล้างคิวเพื่อเริ่มนับ 001 ใหม่สำหรับวันถัดไป
+                  คิวเริ่มนับ 001 ใหม่อัตโนมัติทุกเที่ยงคืน ปุ่มนี้ใช้ล้างคิวของวันนี้ทันที
                 </p>
               </div>
 
