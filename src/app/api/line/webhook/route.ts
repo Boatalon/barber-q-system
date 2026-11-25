@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { validateSignature, WebhookEvent, messagingApi } from '@line/bot-sdk';
+import { validateSignature, type WebhookEvent, messagingApi } from '@line/bot-sdk';
 import { getSupabase } from '@/lib/db';
 import {
   bookLineQueue,
   cancelLineQueue,
   getLineUserQueueStatus,
   getSettings,
-  isShopClosedToday,
+  getTodayShopHoliday,
 } from '@/lib/queue-service';
 import { getBookingTimeStatus, isBookingOpen } from '@/lib/booking-hours';
 import {
@@ -49,10 +49,10 @@ export async function POST(req: NextRequest) {
       // บันทึก userId ของลูกค้าลงตาราง line_followers (ยกเว้นบัญชี LINE ของช่าง)
       if (userId !== settings.barber_line_user_id && !userId.startsWith('sim_')) {
         const supabase = getSupabase();
-        void supabase
+        const { error } = await supabase
           .from('line_followers')
-          .upsert({ line_user_id: userId }, { onConflict: 'line_user_id' })
-          .then(() => {}, () => {});
+          .upsert({ line_user_id: userId }, { onConflict: 'line_user_id', ignoreDuplicates: true });
+        if (error) console.error('[LINE follower registration]', error.message);
       }
 
       let action: 'book' | 'status' | 'cancel' | 'welcome' | 'myid' | null = null;
@@ -78,17 +78,14 @@ export async function POST(req: NextRequest) {
           text === 'ขอไอดี'
         ) {
           action = 'myid';
+        } else if (text.includes('ยกเลิก') || lower === 'cancel') {
+          action = 'cancel';
         } else if (
           text.includes('รับคิว') ||
           text.includes('จองคิว') ||
           lower === 'book'
         ) {
           action = 'book';
-        } else if (
-          text.includes('ยกเลิก') ||
-          lower === 'cancel'
-        ) {
-          action = 'cancel';
         } else if (
           text.includes('เช็คคิว') ||
           text.includes('ดูคิว') ||
@@ -104,14 +101,14 @@ export async function POST(req: NextRequest) {
       const replyMessages: messagingApi.Message[] = [];
 
       if (action === 'welcome') {
-        const [statusInfo, closedInfo] = await Promise.all([
+        const [statusInfo, holiday] = await Promise.all([
           getLineUserQueueStatus(userId),
-          isShopClosedToday(),
+          getTodayShopHoliday(),
         ]);
-        if (closedInfo.isClosed) {
+        if (holiday) {
           replyMessages.push({
             type: 'text',
-            text: lineText('welcome_closed', { shop_name: settings.shop_name, reason: closedInfo.reason || 'วันหยุด' }),
+            text: lineText('welcome_closed', { shop_name: settings.shop_name, reason: holiday.reason || 'วันหยุด' }),
           });
         } else if (!settings.is_accepting_queue) {
           replyMessages.push({ type: 'text', text: lineText('booking_paused') });
@@ -131,46 +128,40 @@ export async function POST(req: NextRequest) {
           text: lineText('my_id', { user_id: userId }),
         });
       } else if (action === 'book') {
-        const closedInfo = await isShopClosedToday();
-        if (closedInfo.isClosed) {
-          replyMessages.push({
-            type: 'text',
-            text: lineText('booking_holiday', { reason: closedInfo.reason || 'วันหยุด' }),
-          });
-        } else {
-          try {
-            const booked = await bookLineQueue(userId);
-            replyMessages.push(
-              buildQueueFlexMessage({
-                templates: settings.line_message_templates,
-                shopName: settings.shop_name,
-                myQueueCode: booked.queue.display_code,
-                myStatus: booked.queue.status,
-                currentServingCode: booked.currentServingCode,
-                queuesAhead: booked.queue.queuesAhead,
-                headlineText: lineText(booked.isNew ? 'booking_new_title' : 'booking_existing_title'),
-              })
-            );
-          } catch (error) {
-            const message = error instanceof Error ? error.message : '';
-            if (message === 'QUEUE_NOT_ACCEPTING') replyMessages.push({ type: 'text', text: lineText('booking_paused') });
-            else if (message.startsWith('BOOKING_NOT_OPEN_YET:')) replyMessages.push({ type: 'text', text: lineText('before_open', { open_time: message.split(':').slice(1).join(':') }) });
-            else if (message.startsWith('BOOKING_CLOSED_FOR_TODAY:')) replyMessages.push({ type: 'text', text: lineText('booking_closed', { close_time: message.split(':').slice(1).join(':'), open_time: settings.booking_open_time }) });
-            else if (message.startsWith('DAILY_LIMIT_REACHED:')) replyMessages.push({ type: 'text', text: lineText('booking_limit', { limit: message.split(':')[1], shop_name: settings.shop_name }) });
-            else throw error;
-          }
+        try {
+          const booked = await bookLineQueue(userId);
+          replyMessages.push(
+            buildQueueFlexMessage({
+              templates: settings.line_message_templates,
+              shopName: settings.shop_name,
+              myQueueCode: booked.queue.display_code,
+              myStatus: booked.queue.status,
+              currentServingCode: booked.currentServingCode,
+              queuesAhead: booked.queue.queuesAhead,
+              headlineText: lineText(booked.isNew ? 'booking_new_title' : 'booking_existing_title'),
+            })
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '';
+          if (message.startsWith('SHOP_CLOSED:')) replyMessages.push({ type: 'text', text: lineText('booking_holiday', { reason: message.slice('SHOP_CLOSED:'.length) }) });
+          else if (message === 'QUEUE_NOT_ACCEPTING') replyMessages.push({ type: 'text', text: lineText('booking_paused') });
+          else if (message.startsWith('BOOKING_NOT_OPEN_YET:')) replyMessages.push({ type: 'text', text: lineText('before_open', { open_time: message.split(':').slice(1).join(':') }) });
+          else if (message.startsWith('BOOKING_CLOSED_FOR_TODAY:')) replyMessages.push({ type: 'text', text: lineText('booking_closed', { close_time: message.split(':').slice(1).join(':'), open_time: settings.booking_open_time }) });
+          else if (message.startsWith('DAILY_LIMIT_REACHED:')) replyMessages.push({ type: 'text', text: lineText('booking_limit', { limit: message.split(':')[1], shop_name: settings.shop_name }) });
+          else throw error;
         }
       } else if (action === 'status') {
-        const [statusInfo, closedInfo] = await Promise.all([
+        const [statusInfo, holiday] = await Promise.all([
           getLineUserQueueStatus(userId),
-          isShopClosedToday(),
+          getTodayShopHoliday(),
         ]);
-        if (closedInfo.isClosed) {
+        if (holiday) {
           replyMessages.push({
             type: 'text',
-            text: lineText('status_holiday', { reason: closedInfo.reason || 'วันหยุด' }),
+            text: lineText('status_holiday', { reason: holiday.reason || 'วันหยุด' }),
           });
-        } else if (statusInfo.activeQueue) {
+        }
+        if (statusInfo.activeQueue) {
           replyMessages.push(
             buildQueueFlexMessage({
               templates: settings.line_message_templates,
@@ -182,7 +173,7 @@ export async function POST(req: NextRequest) {
               headlineText: lineText('status_title'),
             })
           );
-        } else {
+        } else if (!holiday) {
           replyMessages.push({
             type: 'text',
             text: lineText('status_no_queue', { current_queue: statusInfo.currentServingCode ?? 'รอเริ่ม', waiting_count: statusInfo.totalWaiting }),

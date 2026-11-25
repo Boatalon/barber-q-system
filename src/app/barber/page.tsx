@@ -95,7 +95,7 @@ export default function BarberControlPage() {
   }, [nextCooldown]);
 
   const handleAddWalkIn = async () => {
-    if (loadingAction) return;
+    if (loadingAction || !state?.isAcceptingQueue) return;
     setLoadingAction('walkin');
     isMutatingRef.current = true;
 
@@ -405,7 +405,7 @@ export default function BarberControlPage() {
           <div className="flex items-center gap-2">
             <span className="flex h-2 w-2 rounded-full bg-rose-600 animate-pulse shrink-0" />
             <span>
-              ขณะนี้ร้านตั้งสถานะเป็น <strong>วันหยุด</strong> ({state.shopClosedReason || 'ปิดให้บริการ'}) — ลูกค้าไม่สามารถจองคิวผ่าน LINE ได้
+              ขณะนี้ร้านตั้งสถานะเป็น <strong>วันหยุด</strong> ({state.shopClosedReason || 'ปิดให้บริการ'}) จึงปิดรับคิวใหม่ทั้งทาง LINE และหน้าร้าน
             </span>
           </div>
           <Link
@@ -657,7 +657,7 @@ export default function BarberControlPage() {
       <section className="barber-actions grid grid-cols-2 gap-3" aria-label="จัดการคิว">
         <button
           onClick={handleAddWalkIn}
-          disabled={loadingAction !== null}
+          disabled={loadingAction !== null || !state?.isAcceptingQueue}
           className="flex min-h-[112px] flex-col items-center justify-center rounded-2xl bg-emerald-700 px-2 py-3 text-white shadow-md transition-transform hover:bg-emerald-600 active:scale-[0.98] disabled:opacity-60"
         >
           <div className="mb-1.5 flex h-11 w-11 items-center justify-center rounded-full bg-white/20">

@@ -21,7 +21,7 @@ export const LINE_TEMPLATE_DEFINITIONS = {
   booked_ahead_waiting: { label: 'คำอธิบายจำนวนคิวก่อนหน้า', value: 'มีคิวข้างหน้า {queues_ahead} คิว', variables: ['queues_ahead'] },
   booking_new_title: { label: 'หัวบัตรรับคิวสำเร็จ', value: '✅ รับคิวตัดผมสำเร็จ!', variables: [] },
   booking_existing_title: { label: 'หัวบัตรคิวที่มีอยู่แล้ว', value: '📌 คุณมีหมายเลขคิวที่ใช้งานอยู่แล้ว', variables: [] },
-  status_holiday: { label: 'เช็กสถานะในวันหยุด', value: '💈 วันนี้ร้านปิดให้บริการ ({reason}) ไม่มีคิวที่กำลังให้บริการในระบบครับ', variables: ['reason'] },
+  status_holiday: { label: 'เช็กสถานะในวันหยุด', value: '💈 วันนี้ร้านปิดให้บริการ ({reason}) จึงหยุดรับคิวใหม่ครับ', variables: ['reason'] },
   status_no_queue: { label: 'เช็กสถานะเมื่อไม่มีคิว', value: 'ขณะนี้คุณยังไม่มีคิวที่กำลังรอครับ\n• คิวที่กำลังตัด: {current_queue}\n• คิวรอ: {waiting_count} คิว\n\nพิมพ์ "รับคิว" หรือกดเมนูรับคิวได้เลยครับ', variables: ['current_queue', 'waiting_count'] },
   status_title: { label: 'หัวบัตรสถานะคิว', value: '📊 สถานะคิวล่าสุดของคุณ', variables: [] },
   near_first: { label: 'เตือนล่วงหน้าครั้งที่ 1', value: '🔔 คิว {queue_code}: เหลืออีก {queues_ahead} คิว (คิวที่กำลังตัด: {current_queue})', variables: ['queue_code', 'queues_ahead', 'current_queue'] },

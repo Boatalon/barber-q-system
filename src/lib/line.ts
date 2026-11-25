@@ -1,4 +1,5 @@
-import { messagingApi } from '@line/bot-sdk';
+import { createHash } from 'node:crypto';
+import { HTTPFetchError, messagingApi } from '@line/bot-sdk';
 import { getSupabase, type NotificationLogRow } from './db';
 import { renderLineMessage, type LineMessageTemplates } from './line-message-templates';
 
@@ -304,77 +305,98 @@ export async function sendLineNotification(params: {
   );
 }
 
-/**
- * ส่งข้อความประกาศไปยังลูกค้าทุกคน (ยกเว้นบัญชี LINE ของช่าง)
- */
-export async function broadcastLineMessage(
-  messageText: string
-): Promise<{ success: boolean; recipientCount?: number; error?: string }> {
-  const client = getLineClient();
-  if (!client) {
-    return { success: false, error: 'ยังไม่ได้ตั้งค่า LINE Messaging API' };
+// A retry of the same daily announcement can safely resume after a partial LINE outage.
+async function sendAnnouncementBatch(
+  announcementId: string | undefined,
+  audience: string,
+  send: (retryKey?: string) => Promise<unknown>,
+) {
+  if (!announcementId) return send();
+  const bytes = createHash('sha256').update(announcementId + '/' + audience).digest();
+  bytes[6] = (bytes[6] & 0x0f) | 0x80; // UUIDv8, derived from this delivery
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hash = bytes.toString('hex');
+  const retryKey = [hash.slice(0, 8), hash.slice(8, 12), hash.slice(12, 16), hash.slice(16, 20), hash.slice(20, 32)].join('-');
+  try {
+    await send(retryKey);
+  } catch (err) {
+    if (err instanceof HTTPFetchError && err.status === 409 && err.headers.get('x-line-accepted-request-id')) return;
+    throw err;
+  }
+}
+
+async function getAnnouncementRecipients(barberId: string | null) {
+  const supabase = getSupabase();
+  const ids = new Set<string>();
+  for (const table of ['line_followers', 'queues', 'notification_logs']) {
+    let after: string | undefined;
+    // Keyset pagination also skips duplicate IDs across page boundaries.
+    while (true) {
+      let query = supabase.from(table).select('line_user_id').not('line_user_id', 'is', null)
+        .order('line_user_id').limit(500);
+      if (after !== undefined) query = query.gt('line_user_id', after);
+      const { data, error: contactsError } = await query;
+      // Older schemas tracked contacts only in queues and notification logs.
+      if (table === 'line_followers' && (contactsError?.code === 'PGRST205' || contactsError?.code === '42P01')) break;
+      if (contactsError) throw contactsError;
+      if (!data.length) break;
+      for (const { line_user_id: id } of data) {
+        if (id && id !== barberId && !id.startsWith('sim_')) ids.add(id);
+      }
+      after = data[data.length - 1].line_user_id;
+    }
+  }
+
+  return !ids.size && !barberId ? null : [...ids].sort();
+}
+
+async function getAnnouncementAudience(barberId: string | null, holidayId?: number): Promise<string[] | null> {
+  if (holidayId === undefined || !process.env.SUPABASE_SERVICE_ROLE_KEY) {
+    return getAnnouncementRecipients(barberId);
   }
 
   const supabase = getSupabase();
-  const { data: settingsData } = await supabase
-    .from('shop_settings')
-    .select('barber_line_user_id')
-    .eq('id', 1)
-    .maybeSingle();
+  const saved = await supabase.from('holiday_notification_audiences')
+    .select('recipient_ids').eq('holiday_id', holidayId).maybeSingle();
+  if (saved.error) throw saved.error;
+  if (saved.data) return saved.data.recipient_ids;
 
-  const barberId = settingsData?.barber_line_user_id ?? null;
+  const recipients = await getAnnouncementRecipients(barberId);
+  if (recipients?.length === 0) return recipients;
+  const stored = await supabase.from('holiday_notification_audiences')
+    .insert({ holiday_id: holidayId, recipient_ids: recipients });
+  if (stored.error) throw stored.error;
+  return recipients;
+}
 
-  // รวบรวม LINE User ID ของลูกค้าจาก line_followers, queues, และ notification_logs
-  const [fRes, qRes, nRes] = await Promise.all([
-    supabase.from('line_followers').select('line_user_id'),
-    supabase.from('queues').select('line_user_id').not('line_user_id', 'is', null),
-    supabase.from('notification_logs').select('line_user_id').not('line_user_id', 'is', null),
-  ]);
-
-  const allUserIds = new Set<string>();
-  (fRes.data || []).forEach((r: { line_user_id?: string }) => {
-    if (r.line_user_id) allUserIds.add(r.line_user_id);
-  });
-  (qRes.data || []).forEach((r: { line_user_id?: string }) => {
-    if (r.line_user_id) allUserIds.add(r.line_user_id);
-  });
-  (nRes.data || []).forEach((r: { line_user_id?: string }) => {
-    if (r.line_user_id) allUserIds.add(r.line_user_id);
-  });
-
-  // กรอง: ไม่ส่งหาช่าง (barberId) และไม่ส่งหา id จำลอง (sim_)
-  const targetUserIds = Array.from(allUserIds).filter(
-    (id) => id && id !== barberId && !id.startsWith('sim_')
-  );
+export async function broadcastLineMessage(
+  messageText: string,
+  holidayId?: number,
+): Promise<{ success: boolean; recipientCount?: number; error?: string }> {
+  const client = getLineClient();
+  if (!client) return { success: false, error: 'ยังไม่ได้ตั้งค่า LINE Messaging API' };
 
   try {
-    if (targetUserIds.length > 0) {
-      // ส่งด้วย multicast เป็นชุดละไม่เกิน 500 คนตามสเปกของ LINE Messaging API
-      const batchSize = 500;
-      for (let i = 0; i < targetUserIds.length; i += batchSize) {
-        const batch = targetUserIds.slice(i, i + batchSize);
-        await client.multicast({
-          to: batch,
-          messages: [{ type: 'text', text: messageText }],
-        });
-      }
-      return { success: true, recipientCount: targetUserIds.length };
-    }
-
-    // กรณีไม่มีรายชื่อลูกค้าในฐานข้อมูลเลย:
-    // หากไม่ได้ระบุ barberId สามารถ broadcast หาผู้ติดตามทั้งหมดได้
-    // แต่ถ้าระบุ barberId ไว้แล้ว จะไม่ใช้ broadcast ทั่วไปเพื่อป้องกันไม่ให้ข้อความส่งไปรบกวนช่าง
-    if (!barberId) {
-      await client.broadcast({
-        messages: [{ type: 'text', text: messageText }],
-      });
+    const supabase = getSupabase();
+    const { data: settings, error } = await supabase.from('shop_settings')
+      .select('barber_line_user_id').eq('id', 1).single();
+    if (error) throw error;
+    const announcementId = holidayId === undefined ? undefined : `holiday-${holidayId}`;
+    const messages: messagingApi.TextMessage[] = [{ type: 'text', text: messageText }];
+    const recipients = await getAnnouncementAudience(settings.barber_line_user_id, holidayId);
+    if (recipients === null) {
+      await sendAnnouncementBatch(announcementId, 'followers', key => client.broadcast({ messages }, key));
       return { success: true };
     }
 
-    return { success: true, recipientCount: 0 };
-  } catch (err: unknown) {
-    console.error('[LINE Broadcast/Multicast Error]:', err);
-    const errorMsg = err instanceof Error ? err.message : String(err);
-    return { success: false, error: errorMsg };
+    if (!recipients.length) return { success: false, recipientCount: 0, error: 'ไม่พบรายชื่อลูกค้า LINE สำหรับส่งประกาศ' };
+    for (let i = 0; i < recipients.length; i += 500) {
+      const to = recipients.slice(i, i + 500);
+      await sendAnnouncementBatch(announcementId, to.join(','), key => client.multicast({ to, messages }, key));
+    }
+    return { success: true, recipientCount: recipients.length };
+  } catch (err) {
+    console.error('[LINE announcement]', err instanceof Error ? err.message : 'Recipient lookup or delivery failed');
+    return { success: false, error: 'ส่งประกาศ LINE ไม่สำเร็จ' };
   }
 }

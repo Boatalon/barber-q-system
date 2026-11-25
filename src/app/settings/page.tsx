@@ -443,6 +443,7 @@ export default function SettingsPage() {
       if (res.ok) {
         setHolidays(data.holidays);
         setShowCalendarModal(false);
+        if (data.broadcastError) setErrorBanner(data.broadcastError);
         setSelectedDates([]);
         setIsCustomMessageEdited(false);
         setSavedBanner(
@@ -497,6 +498,7 @@ export default function SettingsPage() {
       const data = await res.json();
       if (res.ok) {
         setShowReopenDialog(false);
+        if (data.broadcastError) setErrorBanner(data.broadcastError);
         setSavedBanner(
           `เปิดร้านให้บริการตามปกติแล้ว${data.broadcastSent ? ' พร้อมส่ง LINE บรอดแคสต์บอกลูกค้าแล้ว' : ''
           }`
@@ -531,6 +533,7 @@ export default function SettingsPage() {
       const data = await res.json();
       if (res.ok) {
         setShowQuickCloseDialog(false);
+        if (data.broadcastError) setErrorBanner(data.broadcastError);
         setSavedBanner(
           `ตั้งค่าปิดร้านวันนี้แล้ว${data.broadcastSent ? ' พร้อมส่ง LINE บรอดแคสต์แจ้งลูกค้าแล้ว' : ''
           }`
@@ -705,7 +708,7 @@ export default function SettingsPage() {
                       หยุดงานวันนี้
                     </div>
                     <div className="text-[11px] text-rose-100 font-medium">
-                      ปิดรับคิวทันที · แจ้งวันหยุดเวลา 09:00 น.
+                      ปิดรับคิวและแจ้งลูกค้าทาง LINE
                     </div>
                   </div>
                 </button>
@@ -777,7 +780,7 @@ export default function SettingsPage() {
             <div className="rounded-xl bg-slate-50 p-2.5 text-xs text-slate-600 flex items-center justify-between gap-2">
               <span>
                 {isShopClosedToday
-                  ? `ขณะนี้ระบบปฏิเสธการจองคิว LINE (${shopClosedReason || 'วันหยุดประจำร้าน'})`
+                  ? `ขณะนี้ปิดรับคิวใหม่ทาง LINE และหน้าร้าน (${shopClosedReason || 'วันหยุดประจำร้าน'})`
                   : 'ขณะนี้ระบบเปิดให้ลูกค้าจองคิวผ่าน LINE และหน้าร้านได้ตามปกติ'}
               </span>
               <span className="font-bold text-slate-700 shrink-0">
@@ -1235,6 +1238,11 @@ export default function SettingsPage() {
                 </span>
               </label>
 
+              {selectedDates.includes(getTodayStr()) && (
+                <p className="text-xs text-emerald-900">
+                  ระบบส่งประกาศวันหยุดของวันนี้เวลา 09:00 น. หากเลยเวลานี้แล้ว ระบบจะส่งเมื่อบันทึก
+                </p>
+              )}
               {shouldBroadcast && (
                 <div className="space-y-1 pt-1">
                   <div className="flex items-center justify-between text-[11px] text-emerald-800">
@@ -1283,7 +1291,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={handleSubmitHoliday}
-                disabled={submittingHoliday || selectedDates.length === 0}
+                disabled={submittingHoliday || selectedDates.length === 0 || (shouldBroadcast && !broadcastCustomMessage.trim())}
                 className="flex items-center justify-center gap-1.5 rounded-xl bg-slate-900 py-2.5 text-xs sm:text-sm font-bold text-white shadow-sm hover:bg-slate-800 disabled:opacity-40"
               >
                 {submittingHoliday ? (
@@ -1360,7 +1368,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={handleConfirmReopen}
-                disabled={submittingReopen}
+                disabled={submittingReopen || (reopenBroadcast && !reopenMessage.trim())}
                 className="flex items-center justify-center gap-1.5 rounded-xl bg-emerald-600 py-2.5 text-xs sm:text-sm font-bold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-50"
               >
                 {submittingReopen ? (
@@ -1398,7 +1406,7 @@ export default function SettingsPage() {
                   ยืนยันหยุดงานวันนี้?
                 </h2>
                 <p className="mt-0.5 text-xs text-slate-600 leading-relaxed">
-                  ระบบจะปิดรับคิวทันที หากยังปิดอยู่ตอน 09:00 น. ระบบจะแจ้งลูกค้าทาง LINE
+                  ระบบจะปิดรับคิวทันทีและแจ้งลูกค้าทาง LINE เวลา 09:00 น. หากเลยเวลานี้แล้ว ระบบจะส่งประกาศเมื่อบันทึก
                 </p>
               </div>
             </div>
@@ -1437,7 +1445,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={handleConfirmQuickClose}
-                disabled={submittingQuickClose}
+                disabled={submittingQuickClose || (quickCloseBroadcast && !quickCloseMessage.trim())}
                 className="flex items-center justify-center gap-1.5 rounded-xl bg-rose-600 py-2.5 text-xs sm:text-sm font-bold text-white shadow-sm hover:bg-rose-700 disabled:opacity-50"
               >
                 {submittingQuickClose ? (

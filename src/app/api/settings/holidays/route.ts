@@ -1,42 +1,32 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   addShopHolidays,
-  closeShopToday,
   getSettings,
+  getTodayShopHoliday,
   getShopHolidays,
   getSystemQueueState,
-  openShopToday,
   removeShopHoliday,
 } from '@/lib/queue-service';
 
-import { getSupabase } from '@/lib/db';
-import { getQueueBusinessDate } from '@/lib/booking-hours';
+import { getSupabase, getTodayDateString } from '@/lib/db';
+import { announceHolidayChange } from '@/lib/holiday-notifications';
 
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
   try {
-    const settings = await getSettings();
-    const today = getQueueBusinessDate(settings.booking_open_time, settings.booking_close_time ?? '20:00', new Date(), settings.accepting_override_until);
-    if (req.nextUrl.searchParams.get('view') === 'calendar') {
-      const { data, error } = await getSupabase().rpc('list_shop_holiday_dates');
-      if (error) throw error;
-      const holidays: { holiday_date: string }[] = data;
-      return NextResponse.json({
-        success: true,
-        holidays,
-        isShopClosedToday: holidays.some((row) => row.holiday_date === today),
-      });
-    }
-    const holidays = await getShopHolidays();
-    const holiday = holidays.find((row) => row.holiday_date === today);
-    return NextResponse.json({
-      success: true,
-      holidays,
+    const holiday = await getTodayShopHoliday();
+    const status = {
       isShopClosedToday: Boolean(holiday),
       shopClosedReason: holiday?.reason ?? null,
-      settings,
-    });
+    };
+    if (req.nextUrl.searchParams.get('view') === 'calendar') {
+      const { data: holidays, error } = await getSupabase().rpc('list_shop_holiday_dates');
+      if (error) throw error;
+      return NextResponse.json({ success: true, holidays, ...status });
+    }
+    const [holidays, settings] = await Promise.all([getShopHolidays(), getSettings()]);
+    return NextResponse.json({ success: true, holidays, settings, ...status });
   } catch (err) {
     console.error('[GET /api/settings/holidays Error]:', err);
     return NextResponse.json(
@@ -60,18 +50,14 @@ export async function POST(req: NextRequest) {
     const reason = typeof body.reason === 'string' ? body.reason.trim() : 'วันหยุดประจำร้าน';
     const holidays = await addShopHolidays(dates, reason);
 
-    let broadcastSent = false;
-    if (body.broadcast && typeof body.broadcastMessage === 'string' && body.broadcastMessage.trim()) {
-      const { broadcastLineMessage } = await import('@/lib/line');
-      const bRes = await broadcastLineMessage(body.broadcastMessage.trim());
-      broadcastSent = bRes.success;
-    }
+    const message = body.broadcast && typeof body.broadcastMessage === 'string' ? body.broadcastMessage.trim() : undefined;
+    const delivery = await announceHolidayChange(dates, message);
 
     const state = await getSystemQueueState();
     return NextResponse.json({
       success: true,
       holidays,
-      broadcastSent,
+      ...delivery,
       state,
     });
   } catch (err) {
@@ -117,39 +103,20 @@ export async function PUT(req: NextRequest) {
     const body = await req.json();
     const action = body.action; // 'open' | 'close'
 
+    if (action !== 'open' && action !== 'close') {
+      return NextResponse.json({ error: 'Invalid action. Must be "open" or "close"' }, { status: 400 });
+    }
+    const today = getTodayDateString();
     if (action === 'open') {
-      const res = await openShopToday({
-        broadcast: Boolean(body.broadcast),
-        broadcastMessage: typeof body.broadcastMessage === 'string' ? body.broadcastMessage.trim() : undefined,
-      });
-      const state = await getSystemQueueState();
-      return NextResponse.json({
-        success: true,
-        action: 'open',
-        broadcastSent: res.broadcastSent,
-        state,
-      });
+      await removeShopHoliday(today);
+    } else {
+      const reason = (typeof body.reason === 'string' && body.reason.trim()) || 'วันหยุดประจำร้าน';
+      await addShopHolidays([today], reason);
     }
-
-    if (action === 'close') {
-      const res = await closeShopToday({
-        reason: typeof body.reason === 'string' ? body.reason.trim() : undefined,
-        broadcast: Boolean(body.broadcast),
-        broadcastMessage: typeof body.broadcastMessage === 'string' ? body.broadcastMessage.trim() : undefined,
-      });
-      const state = await getSystemQueueState();
-      return NextResponse.json({
-        success: true,
-        action: 'close',
-        broadcastSent: res.broadcastSent,
-        state,
-      });
-    }
-
-    return NextResponse.json(
-      { error: 'Invalid action. Must be "open" or "close"' },
-      { status: 400 }
-    );
+    const message = body.broadcast && typeof body.broadcastMessage === 'string' ? body.broadcastMessage.trim() : undefined;
+    const delivery = await announceHolidayChange(action === 'close' ? [today] : [], message);
+    const state = await getSystemQueueState();
+    return NextResponse.json({ success: true, action, ...delivery, state });
   } catch (err) {
     console.error('[PUT /api/settings/holidays Error]:', err);
     return NextResponse.json(
